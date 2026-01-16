@@ -1,9 +1,13 @@
 import itertools
+import time
 
 import duckdb
 import requests
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import threading
+from requests.adapters import HTTPAdapter
 
 # 1) Get DOI for all papers from arxiv id
 # 2) Get author list and update papers table
@@ -20,7 +24,16 @@ count = (
     conn.execute("SELECT count(*) from papers where author_ids is null;")
     .fetchdf()
     .values
-)
+)[0][0]
+
+_tls = threading.local()
+
+def get_session():
+    if not hasattr(_tls, "s"):
+        s = requests.Session()
+        s.mount("https://", HTTPAdapter(pool_connections=32, pool_maxsize=32))
+        _tls.s = s
+    return _tls.s
 
 
 def get_author_ids(dois: str, *, prefer_orcid: bool = True) -> dict[str, list[str]]:
@@ -31,21 +44,34 @@ def get_author_ids(dois: str, *, prefer_orcid: bool = True) -> dict[str, list[st
     """
     url = "https://api.openalex.org/works"
 
-    filter_str = "doi:" + "|".join([f"https://doi.org/{d.split()[0]}" for d in dois])
-    session = requests.Session()
-    r = session.get(
-        url,
-        params={
-            "filter": filter_str,
-            "per-page": 50,
-            "select": "doi,authorships",
-            "mailto": "manors@purdue.edu",
-        },
-        timeout=20,
-    )
+    filter_str = "doi:" + "|".join([f"https://doi.org/{d.split()[0].rstrip(',')}" for d in dois if d and d.strip()])
+    for attempt in range(3):
+        try:
+            r = get_session().get(
+                url,
+                params={
+                    "filter": filter_str,
+                    "per-page": 50,
+                    "select": "doi,authorships",
+                    "mailto": "manors@purdue.edu",
+                },
+                timeout=20,
+            )
+            if r.status_code == 400:
+                print(f"Skipping bad batch: {dois[:2]}...")
+                return {}
+            if r.status_code == 429:
+                time.sleep(2 ** attempt)
+                continue
 
-    r.raise_for_status()
-    w = r.json()["results"]
+            r.raise_for_status()
+            break
+        except requests.exceptions.RequestException as e:
+            if attempt == 2:
+                print(f"Failed batch after 3 attempts: {e}")
+                return {}
+            time.sleep(1)
+
     out: dict[str, list[str]] = {}
 
     works = r.json()["results"]
@@ -70,26 +96,58 @@ def get_author_ids(dois: str, *, prefer_orcid: bool = True) -> dict[str, list[st
 
 total_dois = [x[0] for x in res.values]
 
-print(f"Count: {count[0]}")
-batches_per_commit = 2000
+print(f"Count: {count}")
+MAX_WORKERS = 16
 
 idx = 0
+BATCHES_TO_SAVE = 200
+conn.execute("CREATE TEMP TABLE IF NOT EXISTS batch_updates (doi_lc VARCHAR, author_ids VARCHAR[]);")
 conn.execute("BEGIN TRANSACTION;")
 
-with tqdm(total=count[0][0]) as pbar:
-    for sub_dois in itertools.batched(total_dois, 50):
-        author_ids = get_author_ids(sub_dois)
-        updates = [(author_list, doi) for doi, author_list in author_ids.items()]
+def job(sub):
+    return get_author_ids(sub)
+batch_iter = itertools.batched(total_dois, 50)
 
-        conn.executemany(
-            "UPDATE papers SET author_ids = ? WHERE doi = ?", updates
-        )
-        pbar.update(50)
-        idx += 50
+with tqdm(total=count) as pbar:
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+        futures = [ex.submit(job, next(batch_iter)) for _ in range(MAX_WORKERS)]
+        finished = 0
+        pending_rows = []  # accumulate rows
+        while futures:
+            for f in as_completed(futures):
+                out = f.result()
+                pending_rows.extend([(doi, ids) for doi, ids in out.items()])
+                finished += 50
+                pbar.update(50)
 
-        if idx % batches_per_commit == 0:
-            conn.execute("COMMIT;")
-            conn.execute("BEGIN TRANSACTION;")
+                # Bulk write every BATCHES_TO_SAVE batches
+                if finished % (BATCHES_TO_SAVE * 50) == 0 and pending_rows:
+                    conn.executemany("INSERT INTO batch_updates VALUES (?, ?)", pending_rows)
+                    conn.execute("""
+                                UPDATE papers
+                                SET author_ids = u.author_ids
+                                FROM batch_updates u
+                                WHERE lower(papers.doi) = u.doi_lc;
+                            """)
+                    conn.execute("DELETE FROM batch_updates")
+                    conn.commit()
+                    pending_rows = []
+
+                # refill
+                try:
+                    futures.remove(f)
+                    futures.append(ex.submit(job, next(batch_iter)))
+                except StopIteration:
+                    futures.remove(f)
+
+        # Flush remaining
+        if pending_rows:
+            conn.executemany("INSERT INTO batch_updates VALUES (?, ?)", pending_rows)
+            conn.execute("""
+                        UPDATE papers SET author_ids = u.author_ids
+                        FROM batch_updates u WHERE lower(papers.doi) = u.doi_lc;
+                    """)
+            conn.execute("DELETE FROM batch_updates")
 
 conn.execute("COMMIT;")
 
