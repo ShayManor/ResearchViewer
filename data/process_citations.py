@@ -5,9 +5,14 @@ import requests
 # 2) Get author list and update papers table
 # 3) Get citations list from DOIs (of DOIs) and update papers table
 
-conn = duckdb.connect('../data.db')
-res = conn.execute('SELECT count(*) FROM papers where ID is not null;').fetchdf()
+conn = duckdb.connect("../data.db")
+res = conn.execute("SELECT id, doi FROM papers where doi is null limit 10;").fetchdf()
 
+
+def process_doi(dois: list[str]):
+    for idx, (paper_id, doi) in enumerate(dois):
+        if doi is None:
+            dois[idx] = f"10.48550/arXiv.{paper_id}"
 
 def get_author_ids(dois: str, *, prefer_orcid: bool = True) -> list[str]:
     """
@@ -19,21 +24,23 @@ def get_author_ids(dois: str, *, prefer_orcid: bool = True) -> list[str]:
     """
     url = "https://api.openalex.org/works"
 
-    filter_str = "|".join([f"doi:https://doi.org/{d}" for d in dois])  # dois = list of 50
+    filter_str = "|".join(
+        [f"doi:https://doi.org/{d}" for d in dois]
+    )  # dois = list of 50
     r = requests.get(
         url,
         params={"filter": filter_str, "per-page": 50, "select": "doi,authorships"},
-        timeout=20
+        timeout=20,
     )
 
     r.raise_for_status()
-    w = r.json()['results']
+    w = r.json()["results"]
 
     ids: list[str] = []
     for a in w.get("authorships", []):
         author = a.get("author", {}) or {}
-        openalex_id = author.get("id")      # unique author id
-        orcid = author.get("orcid")         # may be None
+        openalex_id = author.get("id")  # unique author id
+        orcid = author.get("orcid")  # may be None
 
         if prefer_orcid and orcid:
             ids.append(orcid)
@@ -41,3 +48,6 @@ def get_author_ids(dois: str, *, prefer_orcid: bool = True) -> list[str]:
             ids.append(openalex_id)
 
     return ids
+
+
+print(res.values)
