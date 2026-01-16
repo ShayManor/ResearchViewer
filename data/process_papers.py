@@ -6,13 +6,20 @@ import requests
 # 3) Get citations list from DOIs (of DOIs) and update papers table
 
 conn = duckdb.connect("../data.db")
-res = conn.execute("SELECT id, doi FROM papers where doi is null limit 10;").fetchdf()
+# Fix missing doi from arxiv ID
+res = conn.execute(
+    "UPDATE papers SET doi = '10.48550/arXiv.' || id WHERE doi IS NULL AND id IS NOT NULL;"
+)
 
-
+# Same as above query
 def process_doi(dois: list[str]):
     for idx, (paper_id, doi) in enumerate(dois):
         if doi is None:
             dois[idx] = f"10.48550/arXiv.{paper_id}"
+
+
+res = conn.execute("SELECT id, doi FROM papers where doi is null limit 10;").fetchdf()
+
 
 def get_author_ids(dois: str, *, prefer_orcid: bool = True) -> list[str]:
     """
