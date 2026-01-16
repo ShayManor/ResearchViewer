@@ -138,8 +138,8 @@ with tqdm(total=count) as pbar:
                     futures.remove(f)
                     futures.append(ex.submit(job, next(batch_iter)))
                 except StopIteration:
-                    futures.remove(f)
-
+                    # futures.remove(f)
+                    pass
         # Flush remaining
         if pending_rows:
             conn.executemany("INSERT INTO batch_updates VALUES (?, ?)", pending_rows)
