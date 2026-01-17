@@ -1,2 +1,4 @@
-duckdb
+duckdb==1.4.3
 tqdm
+flask==3.1.2
+flask-cors==6.0.2
