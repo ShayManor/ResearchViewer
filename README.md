@@ -65,6 +65,9 @@ Input (complete or incomplete) author name and gets all candidate author details
 `GET /api/papers`
 Get all papers with optional filters (subject, journal, date range, keyword). Supports pagination and sorting.
 
+`GET /api/count_papers`
+Get number of papers with optional filters (subject, journal, date range, keyword).
+
 `GET /api/papers/<doi>`
 Get single paper by DOI. Returns title, abstract, authors, citations, keywords, journal, subject, submission time.
 
@@ -108,29 +111,6 @@ Remove author from database.
 
 `POST /api/authors/generate`
 Auto-populate author info from ID. Input: author_id (OpenAlex/ORCID). Returns: name, papers, h-index.
-
-**Users**
-
-`POST /api/users/register`
-Create new user. Input: username, password.
-
-`POST /api/users/login`
-Authenticate user. Input: username, password. Returns: session token.
-
-`GET /api/users/me`
-Get current user profile. Returns: username, read_papers, subjects_of_interest, candidate_papers.
-
-`PUT /api/users/me`
-Update user preferences. Input: subjects_of_interest.
-
-`POST /api/users/me/read`
-Add paper to read list. Input: doi.
-
-`DELETE /api/users/me/read/<doi>`
-Remove paper from read list.
-
-`GET /api/users/me/recommendations`
-Get recommended papers based on read history and interests.
 
 **Analytics**
 

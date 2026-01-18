@@ -1,12 +1,12 @@
 from flask import Blueprint, jsonify
 
 
-services = Blueprint("services", __name__)
+health = Blueprint("health", __name__)
 
-@services.route('/api/')
+@health.route('/api/')
 def ping():
     return jsonify({'ping': 'pong'}, 200)
 
-@services.route('/api/health/<message>')
-def health(message):
+@health.route('/api/health/<message>')
+def health_check(message):
     return jsonify({'response': message}, 200)
