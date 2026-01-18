@@ -44,6 +44,63 @@ def doi_to_s2_id(doi: str) -> str:
     return f"DOI:{doi}"
 
 
+def get_citations_openalex_batch(dois: list[str]) -> dict[str, list[str]]:
+    """Batch query OpenAlex and resolve referenced_works to DOIs."""
+    out = {d.lower(): [] for d in dois}
+
+    # OpenAlex max 50 per request
+    for chunk in itertools.batched(dois, 50):
+        doi_filter = "|".join(chunk)
+
+        r = get_session().get(
+            "https://api.openalex.org/works",
+            params={
+                "filter": f"doi:{doi_filter}",
+                "select": "doi,referenced_works",
+                "per_page": 50
+            },
+            timeout=30
+        )
+
+        if not r.ok:
+            print(f"OpenAlex error: {r.status_code}")
+            continue
+
+        for work in r.json().get("results", []):
+            doi = (work.get("doi") or "").replace("https://doi.org/", "").lower()
+            if not doi:
+                continue
+
+            ref_ids = work.get("referenced_works") or []
+            if not ref_ids:
+                continue
+
+            # Resolve OpenAlex IDs to DOIs in batch
+            # Extract just the IDs: "https://openalex.org/W123" -> "W123"
+            work_ids = [url.split("/")[-1] for url in ref_ids[:100]]  # Limit to 100 refs
+            id_filter = "|".join(work_ids)
+
+            ref_r = get_session().get(
+                "https://api.openalex.org/works",
+                params={
+                    "filter": f"openalex:{id_filter}",
+                    "select": "doi",
+                    "per_page": 100
+                },
+                timeout=30
+            )
+
+            if ref_r.ok:
+                cited_dois = []
+                for ref_work in ref_r.json().get("results", []):
+                    ref_doi = (ref_work.get("doi") or "").replace("https://doi.org/", "").lower()
+                    if ref_doi:
+                        cited_dois.append(ref_doi)
+                out[doi] = cited_dois
+
+    return out
+
+
 def get_citations_batch(dois: list[str], token: str | None = None) -> dict[str, list[str]]:
     """
     Batch query Semantic Scholar for references (outgoing citations).
@@ -90,6 +147,7 @@ def get_citations_batch(dois: list[str], token: str | None = None) -> dict[str, 
 
     for i, paper in enumerate(results):
         if paper is None:
+            print(f"S2 missing: {dois[i]}")
             continue
 
         # Get the original DOI for this paper
@@ -124,11 +182,12 @@ def rate_limited_job(batch, token):
         if elapsed < 1.0:  # 1 RPS with API key
             time.sleep(1.0 - elapsed)
         _last_request = time.time()
-    return get_citations_batch(list(batch), token)
+    # return get_citations_batch(list(batch), token)
+    return get_citations_openalex_batch(list(batch))
 
 
-MAX_WORKERS = 4  # Keep low due to 1 RPS limit
-BATCH_SIZE = 500  # S2 allows up to 500 per request
+MAX_WORKERS = 3  # Keep low due to 1 RPS limit
+BATCH_SIZE = 400  # S2 allows up to 500 per request
 DB_FLUSH = 5000
 
 token = os.getenv("S2_API_KEY")  # Get free key from semanticscholar.org/product/api
