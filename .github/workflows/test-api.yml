@@ -11,7 +11,10 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      checks: write
+      contents: read
 
     steps:
     - name: Checkout code
@@ -40,6 +43,7 @@ jobs:
       if: always()
       with:
         files: pytest-results.xml
+        github_token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Test summary
       if: always()
