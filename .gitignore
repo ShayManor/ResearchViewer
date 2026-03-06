@@ -5,3 +5,12 @@ data.db
 .idea
 .git
 __pycache__
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+.DS_Store
+
+# Allow test database (it's small and needed for CI)
+!tests/test_data.db

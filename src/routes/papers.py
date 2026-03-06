@@ -17,8 +17,16 @@ def get_papers():
     end_date = request.args.get('end_date')
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
+
+    # Validate sort_by field
+    allowed_sort_fields = ['update_date', 'citation_count', 'title', 'id']
     sort_by = request.args.get('sort_by', 'update_date')
+    if sort_by not in allowed_sort_fields:
+        sort_by = 'update_date'
+
     sort_order = request.args.get('sort_order', 'DESC')
+    if sort_order not in ['ASC', 'DESC']:
+        sort_order = 'DESC'
 
     # Build query
     query = "SELECT * FROM papers WHERE deleted = false OR deleted IS NULL"

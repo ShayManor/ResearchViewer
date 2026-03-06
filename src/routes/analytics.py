@@ -162,7 +162,7 @@ def citation_graph():
             node_ids.add(doi)
 
         # Add edges for citations
-        if paper['citations']:
+        if paper['citations'] is not None and len(paper['citations']) > 0:
             for cited_doi in paper['citations']:
                 if cited_doi:
                     edges.append({

@@ -6,12 +6,24 @@ import secrets
 users = Blueprint("users", __name__)
 
 
-def hash_password(password: str, salt: str = None) -> tuple:
-    """Hash password with salt using SHA-256."""
-    if salt is None:
-        salt = secrets.token_hex(16)
+def hash_password(password: str) -> str:
+    """Hash password with embedded salt using SHA-256.
+
+    Returns password_hash in format: salt$hash
+    """
+    salt = secrets.token_hex(16)
     hashed = hashlib.sha256((password + salt).encode()).hexdigest()
-    return hashed, salt
+    return f"{salt}${hashed}"
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    """Verify password against stored hash."""
+    try:
+        salt, stored_hash = password_hash.split('$', 1)
+        new_hash = hashlib.sha256((password + salt).encode()).hexdigest()
+        return new_hash == stored_hash
+    except:
+        return False
 
 
 @users.route("/api/users/register", methods=["POST"])
@@ -36,16 +48,18 @@ def register():
         return jsonify({"error": "Username already exists"}), 409
 
     # Hash password
-    password_hash, salt = hash_password(password)
+    password_hash = hash_password(password)
+
+    # Get next user ID
+    max_id = db.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM users").fetchone()[0]
 
     # Create user
-    result = db.execute("""
-        INSERT INTO users (username, password_hash, salt)
+    db.execute("""
+        INSERT INTO users (id, username, password_hash)
         VALUES (?, ?, ?)
-        RETURNING user_id
-    """, [username, password_hash, salt]).fetchone()
+    """, [max_id, username, password_hash])
 
-    user_id = result[0]
+    user_id = max_id
 
     return jsonify({
         "status": "created",
@@ -68,19 +82,17 @@ def login():
 
     # Get user
     result = db.execute(
-        "SELECT user_id, password_hash, salt FROM users WHERE username = ?",
+        "SELECT id, password_hash FROM users WHERE username = ?",
         [username]
     ).fetchone()
 
     if not result:
         return jsonify({"error": "Invalid credentials"}), 401
 
-    user_id, stored_hash, salt = result
+    user_id, stored_hash = result
 
     # Verify password
-    password_hash, _ = hash_password(password, salt)
-
-    if password_hash != stored_hash:
+    if not verify_password(password, stored_hash):
         return jsonify({"error": "Invalid credentials"}), 401
 
     # Generate session token (simple token for now)
@@ -101,7 +113,7 @@ def get_user(user_id):
 
     # Get user info
     user = db.execute(
-        "SELECT user_id, username FROM users WHERE user_id = ?",
+        "SELECT id, username FROM users WHERE id = ?",
         [user_id]
     ).fetchone()
 
@@ -135,7 +147,7 @@ def delete_user(user_id):
 
     # Check if user exists
     existing = db.execute(
-        "SELECT COUNT(*) FROM users WHERE user_id = ?",
+        "SELECT COUNT(*) FROM users WHERE id = ?",
         [user_id]
     ).fetchone()[0]
 
@@ -146,7 +158,7 @@ def delete_user(user_id):
     db.execute("DELETE FROM user_subjects WHERE user_id = ?", [user_id])
     db.execute("DELETE FROM user_read_papers WHERE user_id = ?", [user_id])
     db.execute("DELETE FROM user_candidates WHERE user_id = ?", [user_id])
-    db.execute("DELETE FROM users WHERE user_id = ?", [user_id])
+    db.execute("DELETE FROM users WHERE id = ?", [user_id])
 
     return jsonify({"status": "deleted", "user_id": user_id})
 
@@ -164,7 +176,7 @@ def add_subject(user_id):
 
     # Check if user exists
     user_exists = db.execute(
-        "SELECT COUNT(*) FROM users WHERE user_id = ?",
+        "SELECT COUNT(*) FROM users WHERE id = ?",
         [user_id]
     ).fetchone()[0]
 
@@ -215,7 +227,7 @@ def add_read_paper(user_id):
 
     # Check if user exists
     user_exists = db.execute(
-        "SELECT COUNT(*) FROM users WHERE user_id = ?",
+        "SELECT COUNT(*) FROM users WHERE id = ?",
         [user_id]
     ).fetchone()[0]
 

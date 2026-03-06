@@ -29,11 +29,11 @@ def init_app(app):
     Args:
         app: Flask application instance
     """
-    with app.app_context():
-        get_db()  # Create connection immediately
-
     # Log database path for debugging in containers
-    app.logger.info(f"Connected to DuckDB at: {DATABASE_PATH}")
+    app.logger.info(f"DuckDB path configured: {DATABASE_PATH}")
+
+    # Connection will be created lazily on first use
+    # This allows tests to import the module without locking the database
 
 
 def close_db():
