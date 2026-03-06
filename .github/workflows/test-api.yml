@@ -2,9 +2,12 @@ name: API Tests
 
 on:
   push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main, develop ]
+    branches: [ "main" ]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - ".github/workflows/test-api.yml"
+  workflow_dispatch:
 
 jobs:
   test:
@@ -31,6 +34,12 @@ jobs:
     - name: Run tests
       run: |
         python -m pytest tests/test_api.py -v --tb=short
+
+    - name: Publish test results
+      uses: EnricoMi/publish-unit-test-result-action@v2
+      if: always()
+      with:
+        files: pytest-results.xml
 
     - name: Test summary
       if: always()
