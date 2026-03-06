@@ -44,11 +44,8 @@ jobs:
             type=sha
 
       - name: Build & push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          provenance: false
+        run: |
+          IMAGE_TAGS=$(echo "${{ steps.meta.outputs.tags }}" | tr '\n' ' ')
+          TAG_ARGS=$(for tag in $IMAGE_TAGS; do echo "-t $tag"; done | tr '\n' ' ')
+          docker build $TAG_ARGS -f Dockerfile .
+          for tag in $IMAGE_TAGS; do docker push $tag; done
