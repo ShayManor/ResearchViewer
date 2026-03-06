@@ -1,7 +1,7 @@
 # ResearchViewer
 Arxiv dataset analyzer for CS 348 (Databases)
 
-![Tests](https://github.com/shayy/ResearchViewer/actions/workflows/run-tests.yml/badge.svg)
+![API Tests](https://github.com/ShayManor/ResearchViewer/actions/workflows/test-api.yml/badge.svg)
 
 TODO:
 1) Write basic CRUD API
