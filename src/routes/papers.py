@@ -1,10 +1,10 @@
 from flask import Blueprint, request, jsonify
 from src.database import get_db, df_to_json_serializable
 
-papers = Blueprint("papers", __name__)
+papers_bp = Blueprint("papers", __name__)
 
 
-@papers.route("/api/papers", methods=["GET"])
+@papers_bp.route("/api/papers", methods=["GET"])
 def get_papers():
     """Get all papers with optional filters (subject, journal, date range, keyword). Supports pagination and sorting."""
     db = get_db()
@@ -67,7 +67,7 @@ def get_papers():
     })
 
 
-@papers.route("/api/count_papers", methods=["GET"])
+@papers_bp.route("/api/count_papers", methods=["GET"])
 def count_papers():
     """Get number of papers with optional filters (subject, journal, date range, keyword)."""
     db = get_db()
@@ -109,7 +109,7 @@ def count_papers():
     return jsonify({"count": result[0]})
 
 
-@papers.route("/api/papers/<path:doi>", methods=["GET"])
+@papers_bp.route("/api/papers/<path:doi>", methods=["GET"])
 def get_paper(doi):
     """Get single paper by DOI. Returns title, abstract, authors, citations, keywords, journal, subject, submission time."""
     db = get_db()
@@ -126,7 +126,7 @@ def get_paper(doi):
     return jsonify(paper)
 
 
-@papers.route("/api/papers", methods=["POST"])
+@papers_bp.route("/api/papers", methods=["POST"])
 def add_paper():
     """Add new paper. Input: title, doi, authors, citations, keywords, journal, subject, submission_time."""
     db = get_db()
@@ -169,7 +169,7 @@ def add_paper():
     return jsonify({"status": "created", "doi": data['doi']}), 201
 
 
-@papers.route("/api/papers/<path:doi>", methods=["PUT"])
+@papers_bp.route("/api/papers/<path:doi>", methods=["PUT"])
 def update_paper(doi):
     """Update existing paper by DOI. Input: fields to update."""
     db = get_db()
@@ -215,7 +215,7 @@ def update_paper(doi):
     return jsonify({"status": "updated", "doi": doi})
 
 
-@papers.route("/api/papers/<path:doi>", methods=["DELETE"])
+@papers_bp.route("/api/papers/<path:doi>", methods=["DELETE"])
 def delete_paper(doi):
     """Remove paper from database."""
     db = get_db()
@@ -232,14 +232,14 @@ def delete_paper(doi):
     return jsonify({"status": "deleted", "doi": doi})
 
 
-@papers.route("/api/papers/generate", methods=["POST"])
+@papers_bp.route("/api/papers/generate", methods=["POST"])
 def generate_paper():
     """Auto-populate paper info from DOI. Input: doi. Returns: title, authors, citations, keywords, subject."""
     # TODO: Implement external API integration (e.g., CrossRef, OpenAlex)
     return jsonify({"error": "Not implemented yet"}), 501
 
 
-@papers.route("/api/papers/<path:doi>/citations", methods=["GET"])
+@papers_bp.route("/api/papers/<path:doi>/citations", methods=["GET"])
 def get_paper_citations(doi):
     """Get all papers that cite this paper."""
     db = get_db()
@@ -257,7 +257,7 @@ def get_paper_citations(doi):
     })
 
 
-@papers.route("/api/papers/<path:doi>/references", methods=["GET"])
+@papers_bp.route("/api/papers/<path:doi>/references", methods=["GET"])
 def get_paper_references(doi):
     """Get all papers this paper cites."""
     db = get_db()

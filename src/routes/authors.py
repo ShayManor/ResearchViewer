@@ -1,10 +1,10 @@
 from flask import Blueprint, request, jsonify
 from src.database import get_db, df_to_json_serializable
 
-authors = Blueprint("authors", __name__)
+authors_bp = Blueprint("authors", __name__)
 
 
-@authors.route("/api/authors", methods=["GET"])
+@authors_bp.route("/api/authors", methods=["GET"])
 def get_authors():
     """Get all authors with optional filters (name search, subject). Supports pagination."""
     db = get_db()
@@ -38,7 +38,7 @@ def get_authors():
     })
 
 
-@authors.route("/api/authors/search", methods=["GET"])
+@authors_bp.route("/api/authors/search", methods=["GET"])
 def search_authors():
     """Search authors by partial name match. Returns list of candidates."""
     db = get_db()
@@ -63,7 +63,7 @@ def search_authors():
     })
 
 
-@authors.route("/api/authors/<path:author_id>", methods=["GET"])
+@authors_bp.route("/api/authors/<path:author_id>", methods=["GET"])
 def get_author(author_id):
     """Get author by OpenAlex/ORCID ID. Returns: name, papers, h-index, website, title, image."""
     db = get_db()
@@ -80,7 +80,7 @@ def get_author(author_id):
     return jsonify(author)
 
 
-@authors.route("/api/authors", methods=["POST"])
+@authors_bp.route("/api/authors", methods=["POST"])
 def add_author():
     """Add new author. Input: author_id, name, website (optional), title (optional), image (optional)."""
     db = get_db()
@@ -119,7 +119,7 @@ def add_author():
     return jsonify({"status": "created", "author_id": data['author_id']}), 201
 
 
-@authors.route("/api/authors/<path:author_id>", methods=["PUT"])
+@authors_bp.route("/api/authors/<path:author_id>", methods=["PUT"])
 def update_author(author_id):
     """Update existing author. Input: fields to update."""
     db = get_db()
@@ -156,7 +156,7 @@ def update_author(author_id):
     return jsonify({"status": "updated", "author_id": author_id})
 
 
-@authors.route("/api/authors/<path:author_id>", methods=["DELETE"])
+@authors_bp.route("/api/authors/<path:author_id>", methods=["DELETE"])
 def delete_author(author_id):
     """Remove author from database."""
     db = get_db()
@@ -170,7 +170,7 @@ def delete_author(author_id):
     return jsonify({"status": "deleted", "author_id": author_id})
 
 
-@authors.route("/api/authors/generate", methods=["POST"])
+@authors_bp.route("/api/authors/generate", methods=["POST"])
 def generate_author():
     """Auto-populate author info from ID. Input: author_id (OpenAlex/ORCID). Returns: name, papers, h-index."""
     # TODO: Implement external API integration (OpenAlex, ORCID)

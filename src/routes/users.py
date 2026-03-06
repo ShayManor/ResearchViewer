@@ -3,7 +3,7 @@ from src.database import get_db
 import hashlib
 import secrets
 
-users = Blueprint("users", __name__)
+users_bp = Blueprint("users", __name__)
 
 
 def hash_password(password: str) -> str:
@@ -26,7 +26,7 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-@users.route("/api/users/register", methods=["POST"])
+@users_bp.route("/api/users/register", methods=["POST"])
 def register():
     """Create new user. Input: username, password."""
     db = get_db()
@@ -68,7 +68,7 @@ def register():
     }), 201
 
 
-@users.route("/api/users/login", methods=["POST"])
+@users_bp.route("/api/users/login", methods=["POST"])
 def login():
     """Authenticate user. Input: username, password. Returns: session token."""
     db = get_db()
@@ -106,7 +106,7 @@ def login():
     })
 
 
-@users.route("/api/users/<int:user_id>", methods=["GET"])
+@users_bp.route("/api/users/<int:user_id>", methods=["GET"])
 def get_user(user_id):
     """Get user profile. Returns: username, read_papers, subjects_of_interest."""
     db = get_db()
@@ -140,7 +140,7 @@ def get_user(user_id):
     })
 
 
-@users.route("/api/users/<int:user_id>", methods=["DELETE"])
+@users_bp.route("/api/users/<int:user_id>", methods=["DELETE"])
 def delete_user(user_id):
     """Remove user and all associated data."""
     db = get_db()
@@ -163,7 +163,7 @@ def delete_user(user_id):
     return jsonify({"status": "deleted", "user_id": user_id})
 
 
-@users.route("/api/users/<int:user_id>/subjects", methods=["POST"])
+@users_bp.route("/api/users/<int:user_id>/subjects", methods=["POST"])
 def add_subject(user_id):
     """Add subject to user interests. Input: subject."""
     db = get_db()
@@ -201,7 +201,7 @@ def add_subject(user_id):
     return jsonify({"status": "added", "subject": subject})
 
 
-@users.route("/api/users/<int:user_id>/subjects/<subject>", methods=["DELETE"])
+@users_bp.route("/api/users/<int:user_id>/subjects/<subject>", methods=["DELETE"])
 def remove_subject(user_id, subject):
     """Remove subject from user interests."""
     db = get_db()
@@ -214,7 +214,7 @@ def remove_subject(user_id, subject):
     return jsonify({"status": "removed", "subject": subject})
 
 
-@users.route("/api/users/<int:user_id>/read", methods=["POST"])
+@users_bp.route("/api/users/<int:user_id>/read", methods=["POST"])
 def add_read_paper(user_id):
     """Add paper to read list. Input: doi."""
     db = get_db()
@@ -252,7 +252,7 @@ def add_read_paper(user_id):
     return jsonify({"status": "added", "doi": doi})
 
 
-@users.route("/api/users/<int:user_id>/read/<path:doi>", methods=["DELETE"])
+@users_bp.route("/api/users/<int:user_id>/read/<path:doi>", methods=["DELETE"])
 def remove_read_paper(user_id, doi):
     """Remove paper from read list."""
     db = get_db()
@@ -265,7 +265,7 @@ def remove_read_paper(user_id, doi):
     return jsonify({"status": "removed", "doi": doi})
 
 
-@users.route("/api/users/<int:user_id>/recommendations", methods=["GET"])
+@users_bp.route("/api/users/<int:user_id>/recommendations", methods=["GET"])
 def get_recommendations(user_id):
     """Get recommended papers based on read history and subjects. Query params: limit (default 10)."""
     db = get_db()

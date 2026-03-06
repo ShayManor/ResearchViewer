@@ -7,11 +7,11 @@ from flask_cors import CORS
 
 from src.database import init_app as init_database, close_db
 from src.routes.analytics import analytics
-from src.routes.authors import authors
+from src.routes.authors import authors_bp
 from src.routes.frontend import frontend
 from src.routes.health import health
-from src.routes.papers import papers
-from src.routes.users import users
+from src.routes.papers import papers_bp
+from src.routes.users import users_bp
 
 app = Flask(__name__, static_folder=None)
 
@@ -30,9 +30,9 @@ atexit.register(close_db)
 
 app.register_blueprint(frontend)
 app.register_blueprint(health)
-app.register_blueprint(authors)
-app.register_blueprint(papers)
-app.register_blueprint(users)
+app.register_blueprint(authors_bp)
+app.register_blueprint(papers_bp)
+app.register_blueprint(users_bp)
 app.register_blueprint(analytics)
 CORS(app)
 
