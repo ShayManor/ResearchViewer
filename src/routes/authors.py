@@ -1,4 +1,5 @@
-from flask import Blueprint
+from flask import Blueprint, request, jsonify
+from src.database import get_db, df_to_json_serializable
 
 authors = Blueprint("authors", __name__)
 
@@ -6,40 +7,171 @@ authors = Blueprint("authors", __name__)
 @authors.route("/api/authors", methods=["GET"])
 def get_authors():
     """Get all authors with optional filters (name search, subject). Supports pagination."""
-    pass
+    db = get_db()
+
+    # Get query parameters
+    name = request.args.get('name')
+    page = int(request.args.get('page', 1))
+    per_page = int(request.args.get('per_page', 20))
+    sort_by = request.args.get('sort_by', 'cited_by_count')
+    sort_order = request.args.get('sort_order', 'DESC')
+
+    # Build query
+    query = "SELECT * FROM authors"
+    params = []
+
+    if name:
+        query += " WHERE name ILIKE ?"
+        params.append(f"%{name}%")
+
+    # Add sorting and pagination
+    query += f" ORDER BY {sort_by} {sort_order} LIMIT ? OFFSET ?"
+    params.append(per_page)
+    params.append((page - 1) * per_page)
+
+    result = db.execute(query, params).fetchdf()
+
+    return jsonify({
+        "authors": df_to_json_serializable(result),
+        "page": page,
+        "per_page": per_page
+    })
 
 
 @authors.route("/api/authors/search", methods=["GET"])
 def search_authors():
     """Search authors by partial name match. Returns list of candidates."""
-    pass
+    db = get_db()
+
+    name_query = request.args.get('name', '')
+    limit = int(request.args.get('limit', 10))
+
+    if not name_query:
+        return jsonify({"error": "Name query parameter is required"}), 400
+
+    result = db.execute("""
+        SELECT author_id, name, h_index, works_count, cited_by_count
+        FROM authors
+        WHERE name ILIKE ?
+        ORDER BY cited_by_count DESC
+        LIMIT ?
+    """, [f"%{name_query}%", limit]).fetchdf()
+
+    return jsonify({
+        "authors": df_to_json_serializable(result),
+        "count": len(result)
+    })
 
 
 @authors.route("/api/authors/<path:author_id>", methods=["GET"])
 def get_author(author_id):
     """Get author by OpenAlex/ORCID ID. Returns: name, papers, h-index, website, title, image."""
-    pass
+    db = get_db()
+
+    result = db.execute(
+        "SELECT * FROM authors WHERE author_id = ?",
+        [author_id]
+    ).fetchdf()
+
+    if result.empty:
+        return jsonify({"error": "Author not found"}), 404
+
+    author = df_to_json_serializable(result)[0]
+    return jsonify(author)
 
 
 @authors.route("/api/authors", methods=["POST"])
 def add_author():
     """Add new author. Input: author_id, name, website (optional), title (optional), image (optional)."""
-    pass
+    db = get_db()
+    data = request.get_json()
+
+    # Validate required fields
+    if not data.get('author_id'):
+        return jsonify({"error": "author_id is required"}), 400
+
+    if not data.get('name'):
+        return jsonify({"error": "name is required"}), 400
+
+    # Check if author already exists
+    existing = db.execute(
+        "SELECT COUNT(*) FROM authors WHERE author_id = ?",
+        [data['author_id']]
+    ).fetchone()[0]
+
+    if existing > 0:
+        return jsonify({"error": "Author with this ID already exists"}), 409
+
+    # Insert author
+    db.execute("""
+        INSERT INTO authors (
+            author_id, name, paper_dois, h_index, works_count, cited_by_count
+        ) VALUES (?, ?, ?, ?, ?, ?)
+    """, [
+        data.get('author_id'),
+        data.get('name'),
+        data.get('paper_dois', []),
+        data.get('h_index', 0),
+        data.get('works_count', 0),
+        data.get('cited_by_count', 0)
+    ])
+
+    return jsonify({"status": "created", "author_id": data['author_id']}), 201
 
 
 @authors.route("/api/authors/<path:author_id>", methods=["PUT"])
 def update_author(author_id):
     """Update existing author. Input: fields to update."""
-    pass
+    db = get_db()
+    data = request.get_json()
+
+    # Check if author exists
+    existing = db.execute(
+        "SELECT COUNT(*) FROM authors WHERE author_id = ?",
+        [author_id]
+    ).fetchone()[0]
+
+    if existing == 0:
+        return jsonify({"error": "Author not found"}), 404
+
+    # Build update query dynamically based on provided fields
+    update_fields = []
+    params = []
+
+    allowed_fields = ['name', 'paper_dois', 'h_index', 'works_count', 'cited_by_count']
+
+    for field in allowed_fields:
+        if field in data:
+            update_fields.append(f'{field} = ?')
+            params.append(data[field])
+
+    if not update_fields:
+        return jsonify({"error": "No valid fields to update"}), 400
+
+    params.append(author_id)
+    query = f"UPDATE authors SET {', '.join(update_fields)} WHERE author_id = ?"
+
+    db.execute(query, params)
+
+    return jsonify({"status": "updated", "author_id": author_id})
 
 
 @authors.route("/api/authors/<path:author_id>", methods=["DELETE"])
 def delete_author(author_id):
     """Remove author from database."""
-    pass
+    db = get_db()
+
+    # Hard delete author
+    result = db.execute(
+        "DELETE FROM authors WHERE author_id = ?",
+        [author_id]
+    )
+
+    return jsonify({"status": "deleted", "author_id": author_id})
 
 
 @authors.route("/api/authors/generate", methods=["POST"])
 def generate_author():
     """Auto-populate author info from ID. Input: author_id (OpenAlex/ORCID). Returns: name, papers, h-index."""
-    pass
+    # TODO: Implement external API integration (OpenAlex, ORCID)
+    return jsonify({"error": "Not implemented yet"}), 501
