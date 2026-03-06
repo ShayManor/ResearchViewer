@@ -17,6 +17,8 @@ COPY src/ ./src/
 COPY --from=frontend-build /app/frontend/build ./frontend/dist
 
 ENV PORT=8080
+ENV DATABASE_PATH=/data/data.db
 EXPOSE 8080
+VOLUME /data
 
 CMD ["gunicorn", "-b", "0.0.0.0:8080", "src.main:app"]

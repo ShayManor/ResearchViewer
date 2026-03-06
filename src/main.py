@@ -1,8 +1,11 @@
 import os
+import atexit
+import signal
 
 from flask import Flask
 from flask_cors import CORS
 
+from src.database import init_app as init_database, close_db
 from src.routes.analytics import analytics
 from src.routes.authors import authors
 from src.routes.frontend import frontend
@@ -11,6 +14,19 @@ from src.routes.papers import papers
 from src.routes.users import users
 
 app = Flask(__name__, static_folder=None)
+
+# Initialize database connection
+init_database(app)
+
+# Graceful shutdown for containers
+def shutdown_handler(signum, frame):
+    app.logger.info("Shutting down gracefully...")
+    close_db()
+    exit(0)
+
+signal.signal(signal.SIGTERM, shutdown_handler)
+signal.signal(signal.SIGINT, shutdown_handler)
+atexit.register(close_db)
 
 app.register_blueprint(frontend)
 app.register_blueprint(health)

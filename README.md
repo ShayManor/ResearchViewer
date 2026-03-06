@@ -1,6 +1,13 @@
 # ResearchViewer
 Arxiv dataset analyzer for CS 348 (Databases)
 
+TODO:
+1) Write basic CRUD API
+2) Design frontend
+3) Add complex APIs for reports and viewing graph
+4) Implement frontend
+5) Put API + Database onto GCE/Runpod that serves frontend
+6) HTTPS + Networking + Redis
 ## Features
 
 ### Paper Analyzer
