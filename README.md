@@ -4,8 +4,8 @@ Arxiv dataset analyzer for CS 348 (Databases)
 ![API Tests](https://github.com/ShayManor/ResearchViewer/actions/workflows/test-api.yml/badge.svg)
 
 TODO:
-1) Write basic CRUD API
-2) Design frontend
+1) Cluster data and add topics
+2) Update db schema + APIs for frontend use
 3) Add complex APIs for reports and viewing graph
 4) Implement frontend
 5) Put API + Database onto GCE/Runpod that serves frontend
