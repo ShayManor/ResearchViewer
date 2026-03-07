@@ -57,7 +57,7 @@ def get_session() -> requests.Session:
         adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=0)
         s.mount("https://", adapter)
         s.headers.update({
-            "User-Agent": "ResearchViewer OpenAlex topic backfill (mailto:manors@purdue.edu)"
+            "User-Agent": "ResearchViewer OpenAlex topic backfill (mailto:shay.manor@gmail.edu)"
         })
         _tls.session = s
     return _tls.session
@@ -113,6 +113,7 @@ def fetch_topic_batch(dois: list[str], *, mailto: str, max_rps: float) -> tuple[
 
             if r.status_code == 429:
                 time.sleep(min(30, 2 ** attempt))
+                print(r.text)
                 continue
             if r.status_code >= 500:
                 time.sleep(min(30, 2 ** attempt))
