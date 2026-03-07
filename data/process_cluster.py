@@ -25,7 +25,10 @@ from sklearn.preprocessing import normalize
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
-# ── Optional GPU backends ────────────────────────────────────────────────────
+_LABEL_TOKENIZER = None
+_LABEL_MODEL = None
+_LABEL_DEVICE = None
+
 try:
     from transformers import AutoTokenizer
     from adapters import AutoAdapterModel
@@ -38,6 +41,7 @@ except ImportError:
 
 try:
     import spacy
+
     _SPACY = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
 except Exception:
     _SPACY = None
@@ -71,7 +75,7 @@ except ImportError:
 # ── Defaults ─────────────────────────────────────────────────────────────────
 DEFAULT_DB = "../src/data.db"
 DEFAULT_BUCKET_COLUMN = "primary_topic_name"
-DEFAULT_TOPK_ASSIGNMENTS = 2
+DEFAULT_TOPK_ASSIGNMENTS = 1
 DEFAULT_SECONDARY_RATIO = 0.92
 DEFAULT_MIN_DOCS = 40
 DEFAULT_MAX_DOCS_FOR_CLUSTER_SELECTION = 4000
@@ -417,11 +421,41 @@ def build_specter2_embeddings(
     print(
         f"[embed] {len(texts):,} texts → shape={emb.shape} in {elapsed:.1f}s ({len(texts) / max(elapsed, 1e-9):.0f} texts/s)",
         file=sys.stderr)
+    global _LABEL_TOKENIZER, _LABEL_MODEL, _LABEL_DEVICE
+    _LABEL_TOKENIZER = tokenizer
+    _LABEL_MODEL = model
+    _LABEL_DEVICE = device
     return emb, {
         "backend": f"specter2:{base_model}+{adapter_model}",
         "vectorizer": None,
         "device": device,
     }
+
+
+def embed_label_texts(texts: list[str]) -> np.ndarray:
+    global _LABEL_TOKENIZER, _LABEL_MODEL, _LABEL_DEVICE
+    if _LABEL_TOKENIZER is None or _LABEL_MODEL is None:
+        raise RuntimeError("Label embedder not initialized")
+
+    out = []
+    batch_size = 64
+    with torch.no_grad():
+        for start in range(0, len(texts), batch_size):
+            batch = texts[start:start + batch_size]
+            inputs = _LABEL_TOKENIZER(
+                batch,
+                padding=True,
+                truncation=True,
+                max_length=64,
+                return_tensors="pt",
+                return_token_type_ids=False,
+            )
+            inputs = {k: v.to(_LABEL_DEVICE) for k, v in inputs.items()}
+            outputs = _LABEL_MODEL(**inputs)
+            emb = outputs.last_hidden_state[:, 0, :]
+            emb = torch.nn.functional.normalize(emb, p=2, dim=1)
+            out.append(emb.cpu().numpy().astype(np.float32))
+    return np.vstack(out)
 
 
 def build_embeddings(texts: list[str], backend: str, model_name: str, seed: int) -> tuple[np.ndarray, dict]:
@@ -464,13 +498,13 @@ def build_cosine_knn_graph(embeddings: np.ndarray, k: int) -> tuple[np.ndarray, 
 
 
 def choose_k_and_cluster(
-    embeddings: np.ndarray,
-    seed: int,
-    max_docs_for_selection: int,
-    knn_k: int | None,
-    leiden_resolution: float | None,
-    leiden_iterations: int,
-    min_cluster_size: int,
+        embeddings: np.ndarray,
+        seed: int,
+        max_docs_for_selection: int,
+        knn_k: int | None,
+        leiden_resolution: float | None,
+        leiden_iterations: int,
+        min_cluster_size: int,
 ) -> ClusterArtifacts:
     if not IGRAPH_AVAILABLE:
         raise RuntimeError("python-igraph is required for Leiden clustering")
@@ -536,6 +570,20 @@ def choose_k_and_cluster(
     )
 
     labels = merge_small_clusters(embeddings, best_labels, min_cluster_size=min_cluster_size)
+    tmp_unique = np.unique(labels)
+    tmp_centers = []
+    tmp_map = {}
+    for pos, cid in enumerate(tmp_unique):
+        idx = np.where(labels == cid)[0]
+        center = emb[idx].mean(axis=0)
+        center = center / (np.linalg.norm(center) + 1e-12)
+        tmp_centers.append(center)
+        tmp_map[cid] = pos
+    tmp_centers = np.vstack(tmp_centers).astype(np.float32)
+    tmp_labels = np.array([tmp_map[c] for c in labels], dtype=np.int32)
+
+    # merge near-duplicate clusters
+    labels = merge_similar_clusters(tmp_labels, tmp_centers, min_similarity=0.90)
 
     unique_clusters = np.unique(labels)
     centers = []
@@ -560,10 +608,11 @@ def choose_k_and_cluster(
         scores=scores,
     )
 
+
 def merge_small_clusters(
-    embeddings: np.ndarray,
-    labels: np.ndarray,
-    min_cluster_size: int,
+        embeddings: np.ndarray,
+        labels: np.ndarray,
+        min_cluster_size: int,
 ) -> np.ndarray:
     unique, counts = np.unique(labels, return_counts=True)
     sizes = dict(zip(unique.tolist(), counts.tolist()))
@@ -604,6 +653,50 @@ def merge_small_clusters(
     final_ids = np.unique(new_labels)
     remap = {cid: i for i, cid in enumerate(final_ids)}
     return np.array([remap[cid] for cid in new_labels], dtype=np.int32)
+
+
+def merge_similar_clusters(
+        labels: np.ndarray,
+        centers: np.ndarray,
+        min_similarity: float = 0.90,
+) -> np.ndarray:
+    # centers are already normalized
+    sims = centers @ centers.T
+    k = sims.shape[0]
+
+    parent = list(range(k))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for i in range(k):
+        for j in range(i + 1, k):
+            if sims[i, j] >= min_similarity:
+                union(i, j)
+
+    remap = {}
+    next_id = 0
+    merged_labels = np.empty_like(labels)
+
+    for old_id in range(k):
+        root = find(old_id)
+        if root not in remap:
+            remap[root] = next_id
+            next_id += 1
+
+    for i, cid in enumerate(labels):
+        merged_labels[i] = remap[find(int(cid))]
+
+    return merged_labels
+
 
 # ── Labeling ──────────────────────────────────────────────────────────────────
 def aggregate_cluster_keywords(
@@ -666,11 +759,91 @@ def title_case_label(term: str) -> str:
         return ACRONYM_MAP[tl]
     return " ".join(ACRONYM_MAP.get(tok.lower(), tok.capitalize()) for tok in t.split())
 
+
 def normalize_candidate(s: str) -> str:
     s = s.strip().lower()
     s = re.sub(r"\s+", " ", s)
     s = re.sub(r"[^a-z0-9\- ]+", "", s)
     return s.strip()
+
+
+def is_acronym_like(s: str) -> bool:
+    s = s.strip()
+    return bool(re.fullmatch(r"[A-Z0-9\-]{2,10}", s))
+
+
+def bad_candidate(term: str) -> bool:
+    t = normalize_candidate(term)
+    if not t:
+        return True
+
+    toks = t.split()
+    if len(toks) == 0 or len(toks) > 4:
+        return True
+
+    if any(ch.isdigit() for ch in t):
+        return True
+
+    if all(tok in GENERIC_BAD_TERMS for tok in toks):
+        return True
+
+    # critical fix: ban 1-word labels unless they are acronyms
+    if len(toks) == 1:
+        return True
+
+    # avoid phrases starting/ending with junk
+    if toks[0] in GENERIC_BAD_TERMS or toks[-1] in GENERIC_BAD_TERMS:
+        return True
+
+    return False
+
+
+def extract_title_candidates(rep_titles: list[str]) -> list[str]:
+    out = []
+    for title in rep_titles:
+        title = normalize_whitespace(title)
+        if not title:
+            continue
+
+        if _SPACY is not None:
+            doc = _SPACY(title)
+            for chunk in doc.noun_chunks:
+                cand = normalize_candidate(chunk.text)
+                if not bad_candidate(cand):
+                    out.append(cand)
+
+        # fallback / supplement: raw 2-4 grams from title
+        toks = re.findall(r"[A-Za-z][A-Za-z\-]+", title.lower())
+        for n in (4, 3, 2):
+            for i in range(len(toks) - n + 1):
+                cand = " ".join(toks[i:i + n])
+                if not bad_candidate(cand):
+                    out.append(cand)
+
+    return out
+
+
+def acronym_pairs(rep_titles: list[str]) -> dict[str, str]:
+    found = {}
+    pat = re.compile(r"\b([A-Za-z][A-Za-z\- ]{5,})\s+\(([A-Z]{2,10})\)")
+    for title in rep_titles:
+        for long_form, short_form in pat.findall(title):
+            long_form = normalize_candidate(long_form)
+            if not bad_candidate(long_form):
+                found[short_form] = long_form
+    return found
+
+
+def dedupe_preserve_order(items: list[str]) -> list[str]:
+    seen = set()
+    out = []
+    for x in items:
+        x = normalize_candidate(x)
+        if not x or x in seen:
+            continue
+        seen.add(x)
+        out.append(x)
+    return out
 
 
 def bad_candidate(term: str) -> bool:
@@ -707,7 +880,7 @@ def extract_title_candidates(rep_titles: list[str]) -> list[str]:
             toks = re.findall(r"[A-Za-z][A-Za-z\-]+", title.lower())
             for n in (3, 2, 1):
                 for i in range(len(toks) - n + 1):
-                    cand = " ".join(toks[i:i+n])
+                    cand = " ".join(toks[i:i + n])
                     if not bad_candidate(cand):
                         out.append(cand)
     return out
@@ -725,87 +898,87 @@ def acronym_from_titles(rep_titles: list[str]) -> dict[str, str]:
     return found
 
 
-def score_candidates(
-    candidates: list[str],
-    top_terms: list[str],
-    rep_titles: list[str],
+def score_candidates_with_embeddings(
+        candidates: list[str],
+        top_terms: list[str],
+        rep_titles: list[str],
+        cluster_center: np.ndarray,
+        embed_label_texts_fn,
 ) -> list[tuple[str, float]]:
+    candidates = [c for c in dedupe_preserve_order(candidates) if not bad_candidate(c)]
+    if not candidates:
+        return []
+
+    cand_emb = embed_label_texts_fn(candidates)  # shape=(m, d)
+    sims = cand_emb @ cluster_center  # cosine if normalized
+
     title_text = " || ".join(rep_titles).lower()
     term_text = " || ".join(top_terms).lower()
 
-    unique = []
-    seen = set()
-    for c in candidates:
-        c = normalize_candidate(c)
-        if c in seen or bad_candidate(c):
-            continue
-        seen.add(c)
-        unique.append(c)
-
     scored = []
-    for c in unique:
-        toks = c.split()
+    for cand, sim in zip(candidates, sims):
+        toks = cand.split()
 
-        title_hits = title_text.count(c)
-        term_hits = term_text.count(c)
+        title_hits = title_text.count(cand)
+        term_hits = term_text.count(cand)
 
-        # specificity: prefer multiword phrases
-        specificity = 1.0 + 0.35 * (len(toks) - 1)
+        # Prefer 2-3 token phrases
+        length_bonus = 0.0
+        if len(toks) == 2:
+            length_bonus = 0.20
+        elif len(toks) == 3:
+            length_bonus = 0.28
+        elif len(toks) == 4:
+            length_bonus = 0.18
 
-        # brevity: prefer short labels
-        brevity_penalty = 0.18 * max(0, len(toks) - 2)
-
-        # generic penalty
-        generic_penalty = 0.0
-        if any(tok in GENERIC_BAD_TERMS for tok in toks):
-            generic_penalty += 0.75
-
+        # reward phrases that are both semantically central and actually visible
         score = (
-            2.0 * title_hits +
-            1.25 * term_hits +
-            specificity -
-            brevity_penalty -
-            generic_penalty
+                2.5 * float(sim) +
+                0.35 * title_hits +
+                0.20 * term_hits +
+                length_bonus
         )
-        scored.append((c, score))
+        scored.append((cand, score))
 
     scored.sort(key=lambda x: (-x[1], len(x[0]), x[0]))
     return scored
 
 
-def prettify_label(term: str) -> str:
-    words = []
-    for tok in term.split():
-        low = tok.lower()
-        if low in ACRONYM_MAP:
-            words.append(ACRONYM_MAP[low])
-        else:
-            words.append(tok.capitalize())
-    return " ".join(words)
+def prettify_label(term: str, acronyms: dict[str, str]) -> str:
+    # return acronym if it expands to this phrase
+    for short_form, long_form in acronyms.items():
+        if normalize_candidate(long_form) == normalize_candidate(term):
+            return short_form
+    return " ".join(tok.capitalize() for tok in term.split())
 
 
-def pick_short_label(top_terms: list[str], rep_titles: list[str], bucket_value: str) -> str:
-    acronyms = acronym_from_titles(rep_titles)
+def pick_short_label(
+        top_terms: list[str],
+        rep_titles: list[str],
+        bucket_value: str,
+        cluster_center: np.ndarray,
+) -> str:
+    acronyms = acronym_pairs(rep_titles)
 
     candidates = []
     candidates.extend([t for t in top_terms if not bad_candidate(t)])
     candidates.extend(extract_title_candidates(rep_titles))
     candidates.extend(acronyms.values())
 
-    ranked = score_candidates(candidates, top_terms, rep_titles)
+    ranked = score_candidates_with_embeddings(
+        candidates=candidates,
+        top_terms=top_terms,
+        rep_titles=rep_titles,
+        cluster_center=cluster_center,
+        embed_label_texts_fn=embed_label_texts,
+    )
 
-    # prefer acronym if its long form is the best candidate
     if ranked:
-        best = ranked[0][0]
-        for short_form, long_form in acronyms.items():
-            if best == long_form:
-                return short_form
-        return prettify_label(best)
+        return prettify_label(ranked[0][0], acronyms)
 
-    # fallback: shortest non-garbage top term
-    for term in top_terms:
-        if not bad_candidate(term):
-            return prettify_label(term)
+    # fallback: acronym if present
+    if acronyms:
+        return sorted(acronyms.keys(), key=len)[0]
 
     return "Other"
 
@@ -832,16 +1005,17 @@ def make_microtopic_id(bucket_column: str, bucket_value: str, cluster_id: int) -
 
 # ── DB writes ─────────────────────────────────────────────────────────────────
 def write_results(
-        conn: duckdb.DuckDBPyConnection,
-        df: pd.DataFrame,
-        bucket_column: str,
-        bucket_value: str,
-        cluster_scores: np.ndarray,
-        backend_name: str,
-        topk_assignments: int,
-        secondary_ratio: float,
-        replace_bucket: bool,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+        conn,
+        df,
+        bucket_column,
+        bucket_value,
+        cluster_scores,
+        cluster_centers,
+        backend_name,
+        topk_assignments,
+        secondary_ratio,
+        replace_bucket,
+):
     print(f"[write] {bucket_value!r} — building keywords for {len(df):,} docs ...", file=sys.stderr)
     if replace_bucket:
         conn.execute("DELETE FROM paper_microtopics WHERE bucket_column = ? AND bucket_value = ?",
@@ -852,13 +1026,17 @@ def write_results(
     keyword_map = aggregate_cluster_keywords(df["doc_text"].tolist(), df["cluster_id"].to_numpy(), top_n=12)
 
     microtopic_rows = []
-    assignment_rows = []
     microtopic_id_by_cluster: dict[int, str] = {}
 
     for cluster_id, group in df.groupby("cluster_id", sort=True):
         top_terms = [term for term, _ in keyword_map.get(cluster_id, [])]
         rep_titles = representative_titles_for_cluster(df, cluster_scores, cluster_id, n=5)
-        label = pick_short_label(top_terms, rep_titles, bucket_value)
+        label = pick_short_label(
+            top_terms=top_terms,
+            rep_titles=rep_titles,
+            bucket_value=bucket_value,
+            cluster_center=cluster_centers[int(cluster_id)],
+        )
         microtopic_id = make_microtopic_id(bucket_column, bucket_value, int(cluster_id))
         microtopic_id_by_cluster[int(cluster_id)] = microtopic_id
         microtopic_rows.append((
@@ -881,10 +1059,34 @@ def write_results(
     ranks_list = []
     for rank in range(min(topk_assignments, cluster_scores.shape[1])):
         cols = sorted_clusters[:, rank]
-        if rank == 0:
-            mask = np.ones(len(df), dtype=bool)
-        else:
-            mask = cluster_scores[np.arange(len(df)), cols] >= best_scores * secondary_ratio
+        best_scores = cluster_scores.max(axis=1)
+        sorted_clusters = np.argsort(cluster_scores, axis=1)[:, ::-1]
+
+        ranks_list = []
+        for rank in range(min(topk_assignments, cluster_scores.shape[1])):
+            cols = sorted_clusters[:, rank]
+
+            if rank == 0:
+                mask = np.ones(len(df), dtype=bool)
+            else:
+                second_scores = cluster_scores[np.arange(len(df)), cols]
+                # much stricter: only keep second label if it is genuinely competitive
+                mask = (
+                        (second_scores >= 0.96 * best_scores) &
+                        ((best_scores - second_scores) <= 0.03)
+                )
+
+            idxs = np.where(mask)[0]
+            ranks_list.append(pd.DataFrame({
+                "paper_id": paper_ids[idxs],
+                "doi": dois[idxs],
+                "bucket_column": bucket_column,
+                "bucket_value": bucket_value,
+                "microtopic_id": id_map[cols[idxs]],
+                "rank": rank + 1,
+                "score": cluster_scores[idxs, cols[idxs]].astype(float),
+                "is_primary": rank == 0,
+            }))
         idxs = np.where(mask)[0]
         ranks_list.append(pd.DataFrame({
             "paper_id": paper_ids[idxs],
@@ -974,10 +1176,15 @@ def run_pipeline(args: argparse.Namespace) -> None:
         df["cluster_id"] = artifacts.labels
 
         microtopics_df, _ = write_results(
-            conn=conn, df=df,
-            bucket_column=args.bucket_column, bucket_value=args.bucket_value,
-            cluster_scores=artifacts.scores, backend_name=meta["backend"],
-            topk_assignments=args.topk_assignments, secondary_ratio=args.secondary_ratio,
+            conn=conn,
+            df=df,
+            bucket_column=args.bucket_column,
+            bucket_value=args.bucket_value,
+            cluster_scores=artifacts.scores,
+            cluster_centers=artifacts.centers,
+            backend_name=meta["backend"],
+            topk_assignments=args.topk_assignments,
+            secondary_ratio=args.secondary_ratio,
             replace_bucket=(not args.append),
         )
         conn.commit()
@@ -1058,10 +1265,15 @@ def run_all_buckets_pipeline(args: argparse.Namespace) -> None:
     print(f"\n[pipeline] Step 3/3 — Writing {len(clustered)} buckets to DB ...", file=sys.stderr)
     for bv, (df_b, artifacts) in tqdm(clustered, desc="Writing", file=sys.stderr):
         microtopics_df, _ = write_results(
-            conn=conn, df=df_b,
-            bucket_column=args.bucket_column, bucket_value=bv,
-            cluster_scores=artifacts.scores, backend_name=meta["backend"],
-            topk_assignments=args.topk_assignments, secondary_ratio=args.secondary_ratio,
+            conn=conn,
+            df=df_b,
+            bucket_column=args.bucket_column,
+            bucket_value=bv,
+            cluster_scores=artifacts.scores,
+            cluster_centers=artifacts.centers,
+            backend_name=meta["backend"],
+            topk_assignments=args.topk_assignments,
+            secondary_ratio=args.secondary_ratio,
             replace_bucket=(not args.append),
         )
         preview = microtopics_df.sort_values("size", ascending=False)
@@ -1106,6 +1318,7 @@ def _write_summary_json(
         json.dump(out, f, ensure_ascii=False, indent=2)
     print(f"[result] Wrote summary JSON: {args.write_bucket_summary_json}")
 
+
 def choose_knn_k(n_docs: int) -> int:
     # conservative, bucket-size-aware defaults
     if n_docs < 500:
@@ -1118,10 +1331,11 @@ def choose_knn_k(n_docs: int) -> int:
         return 40
     return 50
 
+
 def leiden_partition_from_graph(
-    G,
-    resolution: float,
-    n_iterations: int,
+        G,
+        resolution: float,
+        n_iterations: int,
 ) -> np.ndarray:
     part = G.community_leiden(
         objective_function="modularity",
@@ -1174,6 +1388,7 @@ def score_partition(stats: dict, n_docs: int, min_cluster_size: int) -> float:
 
     return score
 
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 def validate_bucket_column(column: str) -> None:
     if column not in BUCKET_COLUMN_ALLOWLIST:
@@ -1211,7 +1426,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Keep secondary label if sim >= best * ratio")
     p.add_argument("--append", action="store_true", help="Append instead of replacing bucket results")
     p.add_argument("--max-docs-for-cluster-selection", type=int, default=DEFAULT_MAX_DOCS_FOR_CLUSTER_SELECTION,
-                   help="Max sample size for silhouette-based k selection")
+                   help="Max microtopic labels per paper")
     p.add_argument("--cluster-workers", type=int, default=4,
                    help="Parallel threads for clustering in --bucket-value all mode")
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
