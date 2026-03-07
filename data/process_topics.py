@@ -258,7 +258,7 @@ def main() -> None:
     parser.add_argument("--db", default=DB_PATH_DEFAULT)
     parser.add_argument("--mailto", default="manors@purdue.edu")
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
-    parser.add_argument("--batch-size", type=int, default=100)
+    parser.add_argument("--batch-size", type=int, default=80)
     parser.add_argument("--flush-rows", type=int, default=DEFAULT_FLUSH_ROWS)
     parser.add_argument("--max-rps", type=float, default=DEFAULT_RPS)
     parser.add_argument("--force", action="store_true", help="Re-fetch papers even if topics_fetched is already set.")
