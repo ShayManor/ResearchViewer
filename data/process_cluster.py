@@ -656,46 +656,54 @@ def merge_small_clusters(
 
 
 def merge_similar_clusters(
-        labels: np.ndarray,
-        centers: np.ndarray,
-        min_similarity: float = 0.90,
+    labels: np.ndarray,
+    centers: np.ndarray,
+    min_similarity: float = 0.965,
 ) -> np.ndarray:
-    # centers are already normalized
+    """
+    Merge only mutually nearest clusters above a very high similarity threshold.
+    This avoids chain-collapse where A~B, B~C, C~D merges everything.
+    """
     sims = centers @ centers.T
+    np.fill_diagonal(sims, -1.0)
+
     k = sims.shape[0]
+    nearest = np.argmax(sims, axis=1)
 
-    parent = list(range(k))
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a, b):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[rb] = ra
-
+    # only merge mutual nearest neighbors
+    merges = []
+    used = set()
     for i in range(k):
-        for j in range(i + 1, k):
-            if sims[i, j] >= min_similarity:
-                union(i, j)
+        j = int(nearest[i])
+        if j == i:
+            continue
+        if nearest[j] == i and sims[i, j] >= min_similarity:
+            a, b = sorted((i, j))
+            if a not in used and b not in used:
+                merges.append((a, b))
+                used.add(a)
+                used.add(b)
 
-    remap = {}
+    if not merges:
+        return labels
+
+    remap = {i: i for i in range(k)}
+    for a, b in merges:
+        remap[b] = a
+
+    # compact ids
+    root_to_new = {}
     next_id = 0
-    merged_labels = np.empty_like(labels)
+    new_labels = np.empty_like(labels)
 
-    for old_id in range(k):
-        root = find(old_id)
-        if root not in remap:
-            remap[root] = next_id
+    for idx, cid in enumerate(labels):
+        root = remap[int(cid)]
+        if root not in root_to_new:
+            root_to_new[root] = next_id
             next_id += 1
+        new_labels[idx] = root_to_new[root]
 
-    for i, cid in enumerate(labels):
-        merged_labels[i] = remap[find(int(cid))]
-
-    return merged_labels
+    return new_labels
 
 
 # ── Labeling ──────────────────────────────────────────────────────────────────
@@ -1099,10 +1107,10 @@ def write_results(
             "is_primary": rank == 0,
         }))
 
-    microtopics_df = pd.DataFrame(microtopic_rows, columns=[
+    microtopics_df = disambiguate_duplicate_labels(pd.DataFrame(microtopic_rows, columns=[
         "microtopic_id", "bucket_column", "bucket_value", "cluster_id", "label", "size",
         "top_terms_json", "representative_titles_json", "embedding_backend", "cluster_model",
-    ]).astype({
+    ])).astype({
         "microtopic_id": "string", "bucket_column": "string", "bucket_value": "string",
         "cluster_id": "int32", "label": "string", "size": "int32",
         "top_terms_json": "string", "representative_titles_json": "string",
@@ -1199,6 +1207,66 @@ def run_pipeline(args: argparse.Namespace) -> None:
     finally:
         conn.close()
 
+def disambiguate_duplicate_labels(microtopics_df: pd.DataFrame) -> pd.DataFrame:
+    df = microtopics_df.copy()
+
+    # Count label collisions
+    counts = df["label"].value_counts()
+    dup_labels = set(counts[counts > 1].index.tolist())
+
+    if not dup_labels:
+        return df
+
+    new_labels = []
+    for _, row in df.iterrows():
+        label = row["label"]
+        if label not in dup_labels:
+            new_labels.append(label)
+            continue
+
+        top_terms = [t for t, _ in json.loads(row["top_terms_json"])]
+        rep_titles = json.loads(row["representative_titles_json"])
+
+        qualifier = None
+
+        # pick the first decent phrase that is not just the label itself
+        for cand in top_terms:
+            c = normalize_candidate(cand)
+            if not c:
+                continue
+            if c == normalize_candidate(label):
+                continue
+            if normalize_candidate(label) in c:
+                continue
+            if bad_candidate(c):
+                continue
+            acronyms = acronym_pairs(rep_titles)
+            qualifier = prettify_label(c, acronyms)
+            break
+
+        # fallback: representative-title noun phrase
+        if qualifier is None:
+            title_cands = extract_title_candidates(rep_titles)
+            for cand in title_cands:
+                c = normalize_candidate(cand)
+                if not c:
+                    continue
+                if c == normalize_candidate(label):
+                    continue
+                if normalize_candidate(label) in c:
+                    continue
+                if bad_candidate(c):
+                    continue
+                qualifier = prettify_label(c)
+                break
+
+        if qualifier:
+            new_labels.append(f"{label} ({qualifier})")
+        else:
+            new_labels.append(label)
+
+    df["label"] = new_labels
+    return df
 
 # ── All-buckets pipeline ──────────────────────────────────────────────────────
 def run_all_buckets_pipeline(args: argparse.Namespace) -> None:
@@ -1420,7 +1488,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Higher = more, smaller clusters")
     p.add_argument("--leiden-iterations", type=int, default=4,
                    help="Leiden refinement iterations")
-    p.add_argument("--topk-assignments", type=int, default=DEFAULT_TOPK_ASSIGNMENTS,
+    p.add_argument("--topk-assignments", type=int, default=1,
                    help="Max microtopic labels per paper")
     p.add_argument("--secondary-ratio", type=float, default=DEFAULT_SECONDARY_RATIO,
                    help="Keep secondary label if sim >= best * ratio")
