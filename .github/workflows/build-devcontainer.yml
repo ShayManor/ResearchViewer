@@ -6,6 +6,7 @@ on:
     tags: [ "v*", "latest" ]
     paths:
       - "src/**"
+      - "frontend/**"
       - "Dockerfile"
       - "requirements.txt"
       - ".github/workflows/build-devcontainer.yml"
