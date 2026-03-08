@@ -40,45 +40,66 @@ def get_papers():
             WHERE pm.microtopic_id = ?
             AND (p.deleted = false OR p.deleted IS NULL)
         """
+        count_query = """
+            SELECT COUNT(DISTINCT p.id) FROM papers p
+            INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
+            WHERE pm.microtopic_id = ?
+            AND (p.deleted = false OR p.deleted IS NULL)
+        """
         params = [microtopic_id]
     else:
         base_query = "SELECT * FROM papers WHERE deleted = false OR deleted IS NULL"
+        count_query = "SELECT COUNT(*) FROM papers WHERE deleted = false OR deleted IS NULL"
         params = []
 
     # Add filters
     if keyword:
-        base_query += " AND (title ILIKE ? OR abstract ILIKE ? OR authors ILIKE ?)"
+        filter_clause = " AND (title ILIKE ? OR abstract ILIKE ? OR authors ILIKE ?)"
+        base_query += filter_clause
+        count_query += filter_clause
         params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
 
     if subject:
-        base_query += " AND categories LIKE ?"
+        filter_clause = " AND categories LIKE ?"
+        base_query += filter_clause
+        count_query += filter_clause
         params.append(f"%{subject}%")
 
     if author:
-        base_query += " AND authors ILIKE ?"
+        filter_clause = " AND authors ILIKE ?"
+        base_query += filter_clause
+        count_query += filter_clause
         params.append(f"%{author}%")
 
     if start_date:
-        base_query += " AND update_date >= ?"
+        filter_clause = " AND update_date >= ?"
+        base_query += filter_clause
+        count_query += filter_clause
         params.append(start_date)
 
     if end_date:
-        base_query += " AND update_date <= ?"
+        filter_clause = " AND update_date <= ?"
+        base_query += filter_clause
+        count_query += filter_clause
         params.append(end_date)
 
     if min_citations:
-        base_query += " AND citation_count >= ?"
+        filter_clause = " AND citation_count >= ?"
+        base_query += filter_clause
+        count_query += filter_clause
         params.append(int(min_citations))
 
     if max_citations:
-        base_query += " AND citation_count <= ?"
+        filter_clause = " AND citation_count <= ?"
+        base_query += filter_clause
+        count_query += filter_clause
         params.append(int(max_citations))
 
-    # Get total count
-    count_query = base_query.replace("SELECT DISTINCT p.*", "SELECT COUNT(DISTINCT p.id)").replace("SELECT *", "SELECT COUNT(*)")
-    total = db.execute(count_query, params).fetchone()[0]
+    # Get total count (use a copy of params for count query)
+    count_params = params.copy()
+    total = db.execute(count_query, count_params).fetchone()[0]
 
-    # Add sorting and pagination
+    # Add sorting and pagination to main query
     query = base_query + f" ORDER BY {sort_by} {sort_order} LIMIT ? OFFSET ?"
     params.append(per_page)
     params.append((page - 1) * per_page)

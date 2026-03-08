@@ -8,7 +8,7 @@ from typing import Optional, Any
 
 DATABASE_PATH = os.getenv(
     'DATABASE_PATH',
-    os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data.db')
+    os.path.join(os.path.dirname(__file__), 'data.db')
 )
 
 _connection: Optional[duckdb.DuckDBPyConnection] = None
