@@ -5,7 +5,6 @@ import { TopicDetailPanel } from './components/TopicDetailPanel';
 import { RightSidebar } from './components/RightSidebar';
 import { SearchDialog } from './components/SearchDialog';
 import { UserProfilePanel } from './components/UserProfilePanel';
-import { StatsBar } from './components/StatsBar';
 import { api } from './lib/api';
 import {
   DUMMY_USER, buildTopicGraph, getRecommendations, SEED_PAPERS,
@@ -20,8 +19,6 @@ export default function App() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [user, setUser] = useState<UserProfileData>(DUMMY_USER);
   const [recommendations, setRecommendations] = useState<ReturnType<typeof getRecommendations>>([]);
-  const [totalPapers, setTotalPapers] = useState<number | null>(null);
-  const [subjects, setSubjects] = useState<{ subject: string; paper_count: number }[]>([]);
   const [apiOnline, setApiOnline] = useState(false);
 
   useEffect(() => {
@@ -32,8 +29,6 @@ export default function App() {
 
   useEffect(() => {
     api.health().then(() => setApiOnline(true)).catch(() => setApiOnline(false));
-    api.countPapers().then(d => setTotalPapers(d.count)).catch(() => setTotalPapers(SEED_PAPERS.length));
-    api.subjects(10).then(d => setSubjects(d.subjects)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -120,8 +115,6 @@ export default function App() {
           />
         </div>
       </div>
-
-      <StatsBar totalPapers={totalPapers} topicCount={topicNodes.length} edgeCount={topicEdges.length} subjects={subjects} apiOnline={apiOnline} />
 
       {searchOpen && (
         <SearchDialog onClose={() => setSearchOpen(false)} onSelectPaper={p => {

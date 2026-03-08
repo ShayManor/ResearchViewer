@@ -6,11 +6,12 @@ analytics = Blueprint("analytics", __name__)
 
 @analytics.route("/api/analytics/papers/over-time", methods=["GET"])
 def papers_over_time():
-    """Get paper counts over time. Query params: group_by (year/month), subject (optional)."""
+    """Get paper counts and citation totals over time."""
     db = get_db()
 
     group_by = request.args.get('group_by', 'year')
     subject = request.args.get('subject')
+    microtopic_id = request.args.get('microtopic_id')
 
     # Determine date grouping
     if group_by == 'month':
@@ -18,14 +19,31 @@ def papers_over_time():
     else:  # year
         date_trunc = "strftime(update_date, '%Y')"
 
-    # Build query
-    query = f"""
-        SELECT {date_trunc} as period, COUNT(*) as count
-        FROM papers
-        WHERE update_date IS NOT NULL
-        AND (deleted = false OR deleted IS NULL)
-    """
-    params = []
+    # Build query based on filters
+    if microtopic_id:
+        query = f"""
+            SELECT
+                {date_trunc} as period,
+                COUNT(*) as count,
+                SUM(p.citation_count) as total_citations
+            FROM papers p
+            INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
+            WHERE pm.microtopic_id = ?
+            AND p.update_date IS NOT NULL
+            AND (p.deleted = false OR p.deleted IS NULL)
+        """
+        params = [microtopic_id]
+    else:
+        query = f"""
+            SELECT
+                {date_trunc} as period,
+                COUNT(*) as count,
+                SUM(citation_count) as total_citations
+            FROM papers
+            WHERE update_date IS NOT NULL
+            AND (deleted = false OR deleted IS NULL)
+        """
+        params = []
 
     if subject:
         query += " AND categories LIKE ?"
@@ -43,10 +61,36 @@ def papers_over_time():
 
 @analytics.route("/api/analytics/citations/distribution", methods=["GET"])
 def citations_distribution():
-    """Get citation count distribution across papers."""
+    """Get citation count distribution across papers with optional filters."""
     db = get_db()
 
-    result = db.execute("""
+    subject = request.args.get('subject')
+    microtopic_id = request.args.get('microtopic_id')
+
+    # Build query with filters
+    if microtopic_id:
+        base_query = """
+            SELECT p.citation_count
+            FROM papers p
+            INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
+            WHERE pm.microtopic_id = ?
+            AND (p.deleted = false OR p.deleted IS NULL)
+        """
+        params = [microtopic_id]
+    else:
+        base_query = """
+            SELECT citation_count
+            FROM papers
+            WHERE deleted = false OR deleted IS NULL
+        """
+        params = []
+
+    if subject:
+        base_query += " AND categories LIKE ?"
+        params.append(f"%{subject}%")
+
+    query = f"""
+        WITH paper_citations AS ({base_query})
         SELECT
             CASE
                 WHEN citation_count = 0 THEN '0'
@@ -56,30 +100,35 @@ def citations_distribution():
                 WHEN citation_count BETWEEN 26 AND 50 THEN '26-50'
                 WHEN citation_count BETWEEN 51 AND 100 THEN '51-100'
                 WHEN citation_count BETWEEN 101 AND 500 THEN '101-500'
-                ELSE '500+'
+                WHEN citation_count BETWEEN 501 AND 1000 THEN '501-1000'
+                WHEN citation_count BETWEEN 1001 AND 5000 THEN '1001-5000'
+                WHEN citation_count BETWEEN 5001 AND 10000 THEN '5001-10000'
+                ELSE '10000+'
             END as citation_range,
             COUNT(*) as paper_count
-        FROM papers
-        WHERE deleted = false OR deleted IS NULL
+        FROM paper_citations
         GROUP BY citation_range
         ORDER BY MIN(citation_count)
-    """).fetchdf()
+    """
+
+    result = db.execute(query, params).fetchdf()
 
     return jsonify({"distribution": df_to_json_serializable(result)})
 
 
 @analytics.route("/api/analytics/subjects", methods=["GET"])
 def subjects_breakdown():
-    """Get paper counts by subject."""
+    """Get paper counts by subject with average citations."""
     db = get_db()
 
     limit = int(request.args.get('limit', 20))
 
-    # Extract primary category (first in the list)
+    # Extract primary category (first in the list) and calculate avg citations
     result = db.execute("""
         SELECT
             SPLIT_PART(categories, ' ', 1) as subject,
-            COUNT(*) as paper_count
+            COUNT(*) as paper_count,
+            ROUND(AVG(citation_count), 0) as avg_citations
         FROM papers
         WHERE categories IS NOT NULL
         AND (deleted = false OR deleted IS NULL)
@@ -97,24 +146,149 @@ def top_authors():
     db = get_db()
 
     sort_by = request.args.get('sort_by', 'h_index')
-    limit = int(request.args.get('limit', 50))
+    subject = request.args.get('subject')
+    limit = min(int(request.args.get('limit', 50)), 200)
 
     # Validate sort_by
     allowed_sorts = ['h_index', 'works_count', 'cited_by_count']
     if sort_by not in allowed_sorts:
         sort_by = 'h_index'
 
-    result = db.execute(f"""
-        SELECT author_id, name, h_index, works_count, cited_by_count
-        FROM authors
-        WHERE {sort_by} IS NOT NULL
-        ORDER BY {sort_by} DESC
-        LIMIT ?
-    """, [limit]).fetchdf()
+    # If subject filter, join with papers
+    if subject:
+        result = db.execute(f"""
+            SELECT DISTINCT
+                a.author_id, a.name, a.h_index, a.works_count, a.cited_by_count
+            FROM authors a
+            INNER JOIN papers p ON p.id = ANY(a.paper_dois)
+            WHERE p.categories LIKE ?
+            AND a.{sort_by} IS NOT NULL
+            AND (p.deleted = false OR p.deleted IS NULL)
+            ORDER BY a.{sort_by} DESC
+            LIMIT ?
+        """, [f"%{subject}%", limit]).fetchdf()
+    else:
+        result = db.execute(f"""
+            SELECT author_id, name, h_index, works_count, cited_by_count
+            FROM authors
+            WHERE {sort_by} IS NOT NULL
+            ORDER BY {sort_by} DESC
+            LIMIT ?
+        """, [limit]).fetchdf()
 
     return jsonify({
         "top_authors": df_to_json_serializable(result),
         "sorted_by": sort_by
+    })
+
+
+@analytics.route("/api/analytics/velocity", methods=["GET"])
+def submission_velocity():
+    """Paper submission velocity over recent time periods."""
+    db = get_db()
+
+    period = request.args.get('period', 'week')
+    subject = request.args.get('subject')
+    lookback = int(request.args.get('lookback', 12))
+
+    import datetime
+
+    # Calculate period dates
+    today = datetime.date.today()
+    periods = []
+
+    if period == 'week':
+        for i in range(lookback):
+            period_end = today - datetime.timedelta(weeks=i)
+            period_start = period_end - datetime.timedelta(days=7)
+            periods.append((period_start, period_end))
+    else:  # month
+        for i in range(lookback):
+            period_end = today - datetime.timedelta(days=30*i)
+            period_start = period_end - datetime.timedelta(days=30)
+            periods.append((period_start, period_end))
+
+    # Query each period
+    velocity_data = []
+    for period_start, period_end in reversed(periods):
+        query = """
+            SELECT COUNT(*) as count
+            FROM papers
+            WHERE update_date BETWEEN ? AND ?
+            AND (deleted = false OR deleted IS NULL)
+        """
+        params = [period_start.isoformat(), period_end.isoformat()]
+
+        if subject:
+            query += " AND categories LIKE ?"
+            params.append(f"%{subject}%")
+
+        count = db.execute(query, params).fetchone()[0]
+
+        velocity_data.append({
+            'period_start': period_start.isoformat(),
+            'period_end': period_end.isoformat(),
+            'count': count
+        })
+
+    # Calculate statistics
+    counts = [v['count'] for v in velocity_data]
+    avg = sum(counts) / len(counts) if counts else 0
+    latest = counts[-1] if counts else 0
+    delta = latest - avg
+    delta_pct = (delta / avg * 100) if avg > 0 else 0
+
+    return jsonify({
+        "velocity": velocity_data,
+        "period": period,
+        "avg": round(avg, 0),
+        "latest": latest,
+        "delta": round(delta, 0),
+        "delta_pct": round(delta_pct, 1)
+    })
+
+
+@analytics.route("/api/analytics/hot-papers", methods=["GET"])
+def hot_papers():
+    """Recently published papers with high citation growth."""
+    db = get_db()
+
+    subject = request.args.get('subject')
+    since = request.args.get('since')
+    sort_by = request.args.get('sort_by', 'citation_count')
+    limit = int(request.args.get('limit', 10))
+
+    # Default to 2 years ago
+    if not since:
+        import datetime
+        two_years_ago = datetime.date.today() - datetime.timedelta(days=730)
+        since = two_years_ago.isoformat()
+
+    # Validate sort field
+    allowed_sorts = ['citation_count', 'update_date']
+    if sort_by not in allowed_sorts:
+        sort_by = 'citation_count'
+
+    # Build query
+    query = f"""
+        SELECT id, title, citation_count, update_date, categories, authors
+        FROM papers
+        WHERE update_date >= ?
+        AND (deleted = false OR deleted IS NULL)
+    """
+    params = [since]
+
+    if subject:
+        query += " AND categories LIKE ?"
+        params.append(f"%{subject}%")
+
+    query += f" ORDER BY {sort_by} DESC LIMIT ?"
+    params.append(limit)
+
+    result = db.execute(query, params).fetchdf()
+
+    return jsonify({
+        "papers": df_to_json_serializable(result)
     })
 
 

@@ -1,16 +1,14 @@
 from flask import Blueprint, request, jsonify
-from src.database import get_db
+from src.database import get_db, df_to_json_serializable
 import hashlib
 import secrets
+import datetime
 
 users_bp = Blueprint("users", __name__)
 
 
 def hash_password(password: str) -> str:
-    """Hash password with embedded salt using SHA-256.
-
-    Returns password_hash in format: salt$hash
-    """
+    """Hash password with embedded salt using SHA-256."""
     salt = secrets.token_hex(16)
     hashed = hashlib.sha256((password + salt).encode()).hexdigest()
     return f"{salt}${hashed}"
@@ -26,26 +24,28 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-@users_bp.route("/api/users/register", methods=["POST"])
+@users_bp.route("/api/auth/register", methods=["POST"])
 def register():
-    """Create new user. Input: username, password."""
+    """Create account with username, email, password."""
     db = get_db()
     data = request.get_json()
 
     username = data.get('username')
+    email = data.get('email')
     password = data.get('password')
+    focus_topics = data.get('focus_topics', [])
 
-    if not username or not password:
-        return jsonify({"error": "Username and password are required"}), 400
+    if not username or not email or not password:
+        return jsonify({"error": "Username, email and password are required"}), 400
 
-    # Check if username already exists
+    # Check if username or email already exists
     existing = db.execute(
-        "SELECT COUNT(*) FROM users WHERE username = ?",
-        [username]
+        "SELECT COUNT(*) FROM users WHERE username = ? OR email = ?",
+        [username, email]
     ).fetchone()[0]
 
     if existing > 0:
-        return jsonify({"error": "Username already exists"}), 409
+        return jsonify({"error": "Username or email already exists"}), 409
 
     # Hash password
     password_hash = hash_password(password)
@@ -55,22 +55,23 @@ def register():
 
     # Create user
     db.execute("""
-        INSERT INTO users (id, username, password_hash)
-        VALUES (?, ?, ?)
-    """, [max_id, username, password_hash])
+        INSERT INTO users (id, username, email, password_hash, focus_topics, created_at)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    """, [max_id, username, email, password_hash, focus_topics])
 
-    user_id = max_id
+    # Generate session token
+    session_token = secrets.token_urlsafe(32)
 
     return jsonify({
-        "status": "created",
-        "user_id": user_id,
-        "username": username
+        "user_id": max_id,
+        "username": username,
+        "session_token": session_token
     }), 201
 
 
-@users_bp.route("/api/users/login", methods=["POST"])
+@users_bp.route("/api/auth/login", methods=["POST"])
 def login():
-    """Authenticate user. Input: username, password. Returns: session token."""
+    """Authenticate user."""
     db = get_db()
     data = request.get_json()
 
@@ -95,11 +96,10 @@ def login():
     if not verify_password(password, stored_hash):
         return jsonify({"error": "Invalid credentials"}), 401
 
-    # Generate session token (simple token for now)
+    # Generate session token
     session_token = secrets.token_urlsafe(32)
 
     return jsonify({
-        "status": "authenticated",
         "user_id": user_id,
         "username": username,
         "session_token": session_token
@@ -108,42 +108,122 @@ def login():
 
 @users_bp.route("/api/users/<int:user_id>", methods=["GET"])
 def get_user(user_id):
-    """Get user profile. Returns: username, read_papers, subjects_of_interest."""
+    """Get user profile with all statistics."""
     db = get_db()
 
     # Get user info
     user = db.execute(
-        "SELECT id, username FROM users WHERE id = ?",
+        "SELECT id, username, email, focus_topics, linked_author_id, created_at FROM users WHERE id = ?",
         [user_id]
     ).fetchone()
 
     if not user:
         return jsonify({"error": "User not found"}), 404
 
-    # Get subjects of interest
-    subjects = db.execute(
-        "SELECT subject FROM user_subjects WHERE user_id = ?",
+    user_data = {
+        'user_id': user[0],
+        'username': user[1],
+        'email': user[2],
+        'focus_topics': user[3] or [],
+        'linked_author_id': user[4],
+        'created_at': user[5].isoformat() if user[5] else None
+    }
+
+    # Get linked author name if exists
+    if user[4]:
+        author = db.execute(
+            "SELECT name FROM authors WHERE author_id = ?",
+            [user[4]]
+        ).fetchone()
+        user_data['linked_author_name'] = author[0] if author else None
+
+    # Calculate statistics
+    reading_list_count = db.execute(
+        "SELECT COUNT(*) FROM user_reading_list WHERE user_id = ?",
         [user_id]
-    ).fetchall()
+    ).fetchone()[0]
 
-    # Get read papers
-    read_papers = db.execute(
-        "SELECT doi FROM user_read_papers WHERE user_id = ?",
+    papers_read_count = db.execute(
+        "SELECT COUNT(*) FROM user_read_history WHERE user_id = ?",
         [user_id]
-    ).fetchall()
+    ).fetchone()[0]
 
-    return jsonify({
-        "user_id": user[0],
-        "username": user[1],
-        "subjects_of_interest": [s[0] for s in subjects],
-        "read_papers": [p[0] for p in read_papers]
-    })
+    publication_count = db.execute(
+        "SELECT COUNT(*) FROM user_publications WHERE user_id = ?",
+        [user_id]
+    ).fetchone()[0]
+
+    publication_citations = db.execute(
+        "SELECT SUM(citation_count) FROM user_publications WHERE user_id = ?",
+        [user_id]
+    ).fetchone()[0] or 0
+
+    # Get total citations covered from read papers
+    read_papers = db.execute("""
+        SELECT p.citation_count
+        FROM user_read_history urh
+        INNER JOIN papers p ON urh.paper_id = p.id
+        WHERE urh.user_id = ?
+    """, [user_id]).fetchdf()
+
+    total_citations_covered = int(read_papers['citation_count'].sum()) if not read_papers.empty else 0
+    avg_citations_per_read = int(read_papers['citation_count'].mean()) if not read_papers.empty else 0
+
+    # Calculate reading pace (papers per week)
+    if user[5]:
+        days_since_join = (datetime.datetime.now() - user[5]).days
+        reading_pace_per_week = papers_read_count / (days_since_join / 7) if days_since_join > 0 else 0
+    else:
+        days_since_join = 0
+        reading_pace_per_week = 0
+
+    user_data['stats'] = {
+        'reading_list_count': reading_list_count,
+        'papers_read_count': papers_read_count,
+        'total_citations_covered': total_citations_covered,
+        'avg_citations_per_read': avg_citations_per_read,
+        'reading_pace_per_week': round(reading_pace_per_week, 1),
+        'publication_count': publication_count,
+        'publication_citations': publication_citations,
+        'days_since_join': days_since_join
+    }
+
+    # Reading by topic
+    reading_by_topic = db.execute("""
+        SELECT
+            SPLIT_PART(p.categories, ' ', 1) as topic,
+            COUNT(*) as count
+        FROM user_read_history urh
+        INNER JOIN papers p ON urh.paper_id = p.id
+        WHERE urh.user_id = ?
+        AND p.categories IS NOT NULL
+        GROUP BY topic
+        ORDER BY count DESC
+    """, [user_id]).fetchdf()
+
+    user_data['reading_by_topic'] = df_to_json_serializable(reading_by_topic) if not reading_by_topic.empty else []
+
+    # Reading over time
+    reading_over_time = db.execute("""
+        SELECT
+            strftime(read_at, '%Y-%m') as month,
+            COUNT(*) as count
+        FROM user_read_history
+        WHERE user_id = ?
+        GROUP BY month
+        ORDER BY month
+    """, [user_id]).fetchdf()
+
+    user_data['reading_over_time'] = df_to_json_serializable(reading_over_time) if not reading_over_time.empty else []
+
+    return jsonify(user_data)
 
 
-@users_bp.route("/api/users/<int:user_id>", methods=["DELETE"])
-def delete_user(user_id):
-    """Remove user and all associated data."""
+@users_bp.route("/api/users/<int:user_id>", methods=["PUT"])
+def update_user(user_id):
+    """Update profile fields."""
     db = get_db()
+    data = request.get_json()
 
     # Check if user exists
     existing = db.execute(
@@ -154,25 +234,123 @@ def delete_user(user_id):
     if existing == 0:
         return jsonify({"error": "User not found"}), 404
 
-    # Delete related data
-    db.execute("DELETE FROM user_subjects WHERE user_id = ?", [user_id])
-    db.execute("DELETE FROM user_read_papers WHERE user_id = ?", [user_id])
-    db.execute("DELETE FROM user_candidates WHERE user_id = ?", [user_id])
-    db.execute("DELETE FROM users WHERE id = ?", [user_id])
+    # Build update query
+    update_fields = []
+    params = []
 
-    return jsonify({"status": "deleted", "user_id": user_id})
+    allowed_fields = ['email', 'focus_topics', 'linked_author_id']
+    for field in allowed_fields:
+        if field in data:
+            update_fields.append(f'{field} = ?')
+            params.append(data[field])
+
+    if not update_fields:
+        return jsonify({"error": "No valid fields to update"}), 400
+
+    params.append(user_id)
+    query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = ?"
+
+    db.execute(query, params)
+
+    return jsonify({"status": "updated"})
 
 
-@users_bp.route("/api/users/<int:user_id>/subjects", methods=["POST"])
-def add_subject(user_id):
-    """Add subject to user interests. Input: subject."""
+@users_bp.route("/api/users/<int:user_id>/link-author", methods=["PUT"])
+def link_author(user_id):
+    """Link an author profile to user account."""
     db = get_db()
     data = request.get_json()
 
-    subject = data.get('subject')
+    author_id = data.get('author_id')
 
-    if not subject:
-        return jsonify({"error": "Subject is required"}), 400
+    if not author_id:
+        return jsonify({"error": "author_id is required"}), 400
+
+    # Validate author exists
+    author = db.execute(
+        "SELECT author_id, name, h_index, works_count FROM authors WHERE author_id = ?",
+        [author_id]
+    ).fetchone()
+
+    if not author:
+        return jsonify({"error": "Author not found"}), 404
+
+    # Update user
+    db.execute(
+        "UPDATE users SET linked_author_id = ? WHERE id = ?",
+        [author_id, user_id]
+    )
+
+    return jsonify({
+        "status": "linked",
+        "author_id": author[0],
+        "author_name": author[1],
+        "h_index": author[2],
+        "works_count": author[3]
+    })
+
+
+@users_bp.route("/api/users/<int:user_id>/link-author", methods=["DELETE"])
+def unlink_author(user_id):
+    """Unlink author profile from user account."""
+    db = get_db()
+
+    db.execute(
+        "UPDATE users SET linked_author_id = NULL WHERE id = ?",
+        [user_id]
+    )
+
+    return jsonify({"status": "unlinked"})
+
+
+@users_bp.route("/api/users/<int:user_id>/reading-list", methods=["GET"])
+def get_reading_list(user_id):
+    """Get user's reading list."""
+    db = get_db()
+
+    sort_by = request.args.get('sort_by', 'added_at')
+    sort_order = request.args.get('sort_order', 'DESC')
+
+    # Validate sort field
+    allowed_sorts = ['added_at', 'citation_count', 'update_date']
+    if sort_by not in allowed_sorts:
+        sort_by = 'added_at'
+
+    if sort_order not in ['ASC', 'DESC']:
+        sort_order = 'DESC'
+
+    # Get papers with sort
+    if sort_by == 'added_at':
+        order_clause = f"url.added_at {sort_order}"
+    else:
+        order_clause = f"p.{sort_by} {sort_order}"
+
+    result = db.execute(f"""
+        SELECT
+            p.id, p.title, p.citation_count, p.categories, p.update_date,
+            url.added_at
+        FROM user_reading_list url
+        INNER JOIN papers p ON url.paper_id = p.id
+        WHERE url.user_id = ?
+        ORDER BY {order_clause}
+    """, [user_id]).fetchdf()
+
+    return jsonify({
+        "papers": df_to_json_serializable(result) if not result.empty else [],
+        "count": len(result)
+    })
+
+
+@users_bp.route("/api/users/<int:user_id>/reading-list", methods=["POST"])
+def add_to_reading_list(user_id):
+    """Add paper to reading list."""
+    db = get_db()
+    data = request.get_json()
+
+    paper_id = data.get('paper_id')
+
+    if not paper_id:
+        return jsonify({"error": "paper_id is required"}), 400
 
     # Check if user exists
     user_exists = db.execute(
@@ -185,162 +363,309 @@ def add_subject(user_id):
 
     # Check if already added
     existing = db.execute(
-        "SELECT COUNT(*) FROM user_subjects WHERE user_id = ? AND subject = ?",
-        [user_id, subject]
+        "SELECT COUNT(*) FROM user_reading_list WHERE user_id = ? AND paper_id = ?",
+        [user_id, paper_id]
+    ).fetchone()[0]
+
+    if existing > 0:
+        return jsonify({"status": "already_exists"}), 409
+
+    # Add to reading list
+    db.execute(
+        "INSERT INTO user_reading_list (user_id, paper_id, added_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+        [user_id, paper_id]
+    )
+
+    return jsonify({"status": "added", "paper_id": paper_id}), 201
+
+
+@users_bp.route("/api/users/<int:user_id>/reading-list/<path:paper_id>", methods=["DELETE"])
+def remove_from_reading_list(user_id, paper_id):
+    """Remove paper from reading list."""
+    db = get_db()
+
+    db.execute(
+        "DELETE FROM user_reading_list WHERE user_id = ? AND paper_id = ?",
+        [user_id, paper_id]
+    )
+
+    return jsonify({"status": "removed"})
+
+
+@users_bp.route("/api/users/<int:user_id>/read-history", methods=["GET"])
+def get_read_history(user_id):
+    """Get user's read history."""
+    db = get_db()
+
+    sort_by = request.args.get('sort_by', 'read_at')
+    sort_order = request.args.get('sort_order', 'DESC')
+    page = int(request.args.get('page', 1))
+    per_page = min(int(request.args.get('per_page', 50)), 100)
+
+    # Validate sort field
+    allowed_sorts = ['read_at', 'citation_count']
+    if sort_by not in allowed_sorts:
+        sort_by = 'read_at'
+
+    if sort_order not in ['ASC', 'DESC']:
+        sort_order = 'DESC'
+
+    # Get total count
+    total = db.execute(
+        "SELECT COUNT(*) FROM user_read_history WHERE user_id = ?",
+        [user_id]
+    ).fetchone()[0]
+
+    # Get papers with pagination
+    if sort_by == 'read_at':
+        order_clause = f"urh.read_at {sort_order}"
+    else:
+        order_clause = f"p.{sort_by} {sort_order}"
+
+    result = db.execute(f"""
+        SELECT
+            p.id, p.title, p.citation_count, p.categories,
+            urh.read_at
+        FROM user_read_history urh
+        INNER JOIN papers p ON urh.paper_id = p.id
+        WHERE urh.user_id = ?
+        ORDER BY {order_clause}
+        LIMIT ? OFFSET ?
+    """, [user_id, per_page, (page - 1) * per_page]).fetchdf()
+
+    return jsonify({
+        "history": df_to_json_serializable(result) if not result.empty else [],
+        "count": total,
+        "page": page,
+        "per_page": per_page
+    })
+
+
+@users_bp.route("/api/users/<int:user_id>/read-history", methods=["POST"])
+def add_to_read_history(user_id):
+    """Mark a paper as read."""
+    db = get_db()
+    data = request.get_json()
+
+    paper_id = data.get('paper_id')
+    read_at = data.get('read_at', datetime.date.today().isoformat())
+
+    if not paper_id:
+        return jsonify({"error": "paper_id is required"}), 400
+
+    # Check if already added
+    existing = db.execute(
+        "SELECT COUNT(*) FROM user_read_history WHERE user_id = ? AND paper_id = ?",
+        [user_id, paper_id]
     ).fetchone()[0]
 
     if existing > 0:
         return jsonify({"status": "already_exists"}), 200
 
-    # Add subject
+    # Add to read history
     db.execute(
-        "INSERT INTO user_subjects (user_id, subject) VALUES (?, ?)",
-        [user_id, subject]
+        "INSERT INTO user_read_history (user_id, paper_id, read_at) VALUES (?, ?, ?)",
+        [user_id, paper_id, read_at]
     )
 
-    return jsonify({"status": "added", "subject": subject})
+    return jsonify({"status": "added"}), 201
 
 
-@users_bp.route("/api/users/<int:user_id>/subjects/<subject>", methods=["DELETE"])
-def remove_subject(user_id, subject):
-    """Remove subject from user interests."""
+@users_bp.route("/api/users/<int:user_id>/read-history/<path:paper_id>", methods=["DELETE"])
+def remove_from_read_history(user_id, paper_id):
+    """Un-mark a paper as read."""
     db = get_db()
 
     db.execute(
-        "DELETE FROM user_subjects WHERE user_id = ? AND subject = ?",
-        [user_id, subject]
+        "DELETE FROM user_read_history WHERE user_id = ? AND paper_id = ?",
+        [user_id, paper_id]
     )
 
-    return jsonify({"status": "removed", "subject": subject})
+    return jsonify({"status": "removed"})
 
 
-@users_bp.route("/api/users/<int:user_id>/read", methods=["POST"])
-def add_read_paper(user_id):
-    """Add paper to read list. Input: doi."""
+@users_bp.route("/api/users/<int:user_id>/publications", methods=["GET"])
+def get_publications(user_id):
+    """Get user's publications."""
+    db = get_db()
+
+    result = db.execute("""
+        SELECT id, title, venue, year, doi, citation_count, coauthors
+        FROM user_publications
+        WHERE user_id = ?
+        ORDER BY year DESC, id DESC
+    """, [user_id]).fetchdf()
+
+    publications = df_to_json_serializable(result) if not result.empty else []
+
+    total_citations = db.execute(
+        "SELECT SUM(citation_count) FROM user_publications WHERE user_id = ?",
+        [user_id]
+    ).fetchone()[0] or 0
+
+    return jsonify({
+        "publications": publications,
+        "count": len(publications),
+        "total_citations": total_citations
+    })
+
+
+@users_bp.route("/api/users/<int:user_id>/publications", methods=["POST"])
+def add_publication(user_id):
+    """Add a publication."""
     db = get_db()
     data = request.get_json()
 
+    title = data.get('title')
+    venue = data.get('venue')
+    year = data.get('year')
     doi = data.get('doi')
+    citation_count = data.get('citation_count', 0)
+    coauthors = data.get('coauthors', [])
 
-    if not doi:
-        return jsonify({"error": "DOI is required"}), 400
+    if not title or not year:
+        return jsonify({"error": "Title and year are required"}), 400
 
-    # Check if user exists
-    user_exists = db.execute(
-        "SELECT COUNT(*) FROM users WHERE id = ?",
-        [user_id]
-    ).fetchone()[0]
+    # Get next ID
+    max_id = db.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM user_publications").fetchone()[0]
 
-    if user_exists == 0:
-        return jsonify({"error": "User not found"}), 404
+    # Insert publication
+    db.execute("""
+        INSERT INTO user_publications
+        (id, user_id, title, venue, year, doi, citation_count, coauthors, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    """, [max_id, user_id, title, venue, year, doi, citation_count, coauthors])
 
-    # Check if already added
+    return jsonify({"status": "created", "id": max_id}), 201
+
+
+@users_bp.route("/api/users/<int:user_id>/publications/<int:pub_id>", methods=["PUT"])
+def update_publication(user_id, pub_id):
+    """Update a publication entry."""
+    db = get_db()
+    data = request.get_json()
+
+    # Check if publication exists and belongs to user
     existing = db.execute(
-        "SELECT COUNT(*) FROM user_read_papers WHERE user_id = ? AND doi = ?",
-        [user_id, doi]
+        "SELECT COUNT(*) FROM user_publications WHERE id = ? AND user_id = ?",
+        [pub_id, user_id]
     ).fetchone()[0]
 
-    if existing > 0:
-        return jsonify({"status": "already_exists"}), 200
+    if existing == 0:
+        return jsonify({"error": "Publication not found"}), 404
 
-    # Add to read list
-    db.execute(
-        "INSERT INTO user_read_papers (user_id, doi) VALUES (?, ?)",
-        [user_id, doi]
-    )
+    # Build update query
+    update_fields = []
+    params = []
 
-    return jsonify({"status": "added", "doi": doi})
+    allowed_fields = ['title', 'venue', 'year', 'doi', 'citation_count', 'coauthors']
+    for field in allowed_fields:
+        if field in data:
+            update_fields.append(f'{field} = ?')
+            params.append(data[field])
+
+    if not update_fields:
+        return jsonify({"error": "No valid fields to update"}), 400
+
+    params.extend([pub_id, user_id])
+    query = f"UPDATE user_publications SET {', '.join(update_fields)} WHERE id = ? AND user_id = ?"
+
+    db.execute(query, params)
+
+    return jsonify({"status": "updated"})
 
 
-@users_bp.route("/api/users/<int:user_id>/read/<path:doi>", methods=["DELETE"])
-def remove_read_paper(user_id, doi):
-    """Remove paper from read list."""
+@users_bp.route("/api/users/<int:user_id>/publications/<int:pub_id>", methods=["DELETE"])
+def delete_publication(user_id, pub_id):
+    """Delete a publication."""
     db = get_db()
 
     db.execute(
-        "DELETE FROM user_read_papers WHERE user_id = ? AND doi = ?",
-        [user_id, doi]
+        "DELETE FROM user_publications WHERE id = ? AND user_id = ?",
+        [pub_id, user_id]
     )
 
-    return jsonify({"status": "removed", "doi": doi})
+    return jsonify({"status": "deleted"})
 
 
 @users_bp.route("/api/users/<int:user_id>/recommendations", methods=["GET"])
 def get_recommendations(user_id):
-    """Get recommended papers based on read history and subjects. Query params: limit (default 10)."""
+    """Get recommended papers based on reading history and topics."""
     db = get_db()
 
     limit = int(request.args.get('limit', 10))
+    strategy = request.args.get('strategy', 'hybrid')
 
-    # Get user's subjects and read papers
-    subjects = db.execute(
-        "SELECT subject FROM user_subjects WHERE user_id = ?",
+    # Get user's read papers
+    read_papers = db.execute(
+        "SELECT paper_id FROM user_read_history WHERE user_id = ?",
         [user_id]
-    ).fetchall()
+    ).fetchdf()
 
-    read_dois = db.execute(
-        "SELECT doi FROM user_read_papers WHERE user_id = ?",
-        [user_id]
-    ).fetchall()
-
-    if not subjects and not read_dois:
+    if read_papers.empty:
         return jsonify({"recommendations": [], "count": 0})
 
-    # Build recommendation query
-    # Strategy: Find papers that:
-    # 1. Are in user's subjects of interest
-    # 2. Cite or are cited by papers user has read
-    # 3. Are highly cited
-    # 4. User hasn't read yet
+    read_paper_ids = read_papers['paper_id'].tolist()
+    placeholders = ','.join(['?'] * len(read_paper_ids))
 
     recommendations = []
 
-    # Recommend based on subjects
-    if subjects:
-        subject_list = [s[0] for s in subjects]
-        placeholders = ','.join(['?'] * len(subject_list))
-
-        subject_recs = db.execute(f"""
-            SELECT doi, title, abstract, categories, citation_count
-            FROM papers
-            WHERE (deleted = false OR deleted IS NULL)
-            AND categories IN ({placeholders})
-            ORDER BY citation_count DESC
-            LIMIT ?
-        """, subject_list + [limit]).fetchdf()
-
-        recommendations.extend(subject_recs.to_dict('records'))
-
-    # Recommend based on citation graph (papers that cite what user read)
-    if read_dois and len(recommendations) < limit:
-        read_list = [d[0] for d in read_dois]
-        placeholders = ','.join(['?'] * len(read_list))
-
-        citation_recs = db.execute(f"""
-            SELECT DISTINCT p.doi, p.title, p.abstract, p.categories, p.citation_count
+    if strategy in ['citation_graph', 'hybrid']:
+        # Papers that cite papers user has read
+        citing_papers = db.execute(f"""
+            SELECT DISTINCT p.id, p.title, p.citation_count, p.categories, p.update_date
             FROM papers p
-            WHERE (p.deleted = false OR p.deleted IS NULL)
+            WHERE p.id NOT IN ({placeholders})
             AND EXISTS (
                 SELECT 1 FROM unnest(p.citations) AS c(citation)
                 WHERE c.citation IN ({placeholders})
             )
+            AND (p.deleted = false OR p.deleted IS NULL)
             ORDER BY p.citation_count DESC
             LIMIT ?
-        """, read_list + [limit - len(recommendations)]).fetchdf()
+        """, read_paper_ids + read_paper_ids + [limit]).fetchdf()
 
-        recommendations.extend(citation_recs.to_dict('records'))
+        for _, paper in citing_papers.iterrows():
+            recommendations.append({
+                'id': paper['id'],
+                'title': paper['title'],
+                'citation_count': int(paper['citation_count']),
+                'categories': paper['categories'],
+                'update_date': paper['update_date'],
+                'reason': 'Cites papers in your reading history',
+                'score': 0.9
+            })
 
-    # Remove duplicates and papers already read
-    seen = set([d[0] for d in read_dois])
-    unique_recs = []
-    for rec in recommendations:
-        if rec['doi'] not in seen:
-            unique_recs.append(rec)
-            seen.add(rec['doi'])
-            if len(unique_recs) >= limit:
-                break
+    if strategy in ['topic_similarity', 'hybrid'] and len(recommendations) < limit:
+        # Papers sharing microtopics with read papers
+        similar_papers = db.execute(f"""
+            SELECT DISTINCT p.id, p.title, p.citation_count, p.categories, p.update_date
+            FROM papers p
+            INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
+            WHERE pm.microtopic_id IN (
+                SELECT DISTINCT microtopic_id
+                FROM paper_microtopics
+                WHERE paper_id IN ({placeholders})
+            )
+            AND p.id NOT IN ({placeholders})
+            AND (p.deleted = false OR p.deleted IS NULL)
+            ORDER BY p.citation_count DESC
+            LIMIT ?
+        """, read_paper_ids + read_paper_ids + [limit - len(recommendations)]).fetchdf()
+
+        for _, paper in similar_papers.iterrows():
+            if paper['id'] not in [r['id'] for r in recommendations]:
+                recommendations.append({
+                    'id': paper['id'],
+                    'title': paper['title'],
+                    'citation_count': int(paper['citation_count']),
+                    'categories': paper['categories'],
+                    'update_date': paper['update_date'],
+                    'reason': 'Shares topics with your reading history',
+                    'score': 0.7
+                })
 
     return jsonify({
-        "recommendations": unique_recs[:limit],
-        "count": len(unique_recs[:limit])
+        "recommendations": recommendations[:limit],
+        "count": len(recommendations[:limit])
     })

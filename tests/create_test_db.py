@@ -41,7 +41,20 @@ def create_test_database():
             author_ids VARCHAR[],
             deleted BOOLEAN,
             citations VARCHAR[],
-            citation_count INTEGER
+            citation_count INTEGER,
+            oa_work_id VARCHAR,
+            primary_topic_id VARCHAR,
+            primary_topic_name VARCHAR,
+            primary_topic_score DOUBLE,
+            primary_subfield_id VARCHAR,
+            primary_subfield_name VARCHAR,
+            primary_field_id VARCHAR,
+            primary_field_name VARCHAR,
+            primary_domain_id VARCHAR,
+            primary_domain_name VARCHAR,
+            topics_json VARCHAR,
+            topics_fetched BOOLEAN,
+            topics_updated_at TIMESTAMP
         )
     """)
 
@@ -57,35 +70,83 @@ def create_test_database():
         )
     """)
 
+    # Create microtopics table
+    conn.execute("""
+        CREATE TABLE microtopics (
+            microtopic_id VARCHAR PRIMARY KEY,
+            bucket_column VARCHAR,
+            bucket_value VARCHAR,
+            cluster_id INTEGER,
+            label VARCHAR,
+            size INTEGER,
+            top_terms_json VARCHAR,
+            representative_titles_json VARCHAR,
+            embedding_backend VARCHAR,
+            cluster_model VARCHAR,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Create paper_microtopics table
+    conn.execute("""
+        CREATE TABLE paper_microtopics (
+            paper_id VARCHAR,
+            doi VARCHAR,
+            bucket_column VARCHAR,
+            bucket_value VARCHAR,
+            microtopic_id VARCHAR,
+            rank INTEGER,
+            score DOUBLE,
+            is_primary BOOLEAN,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # Create users table
     conn.execute("""
         CREATE TABLE users (
             id INTEGER PRIMARY KEY,
             username VARCHAR UNIQUE NOT NULL,
+            email VARCHAR UNIQUE NOT NULL,
             password_hash VARCHAR NOT NULL,
+            linked_author_id VARCHAR,
+            focus_topics VARCHAR[],
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Create user-related tables
+    # Create user_reading_list table
     conn.execute("""
-        CREATE TABLE user_subjects (
+        CREATE TABLE user_reading_list (
             user_id INTEGER,
-            subject VARCHAR
+            paper_id VARCHAR,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, paper_id)
         )
     """)
 
+    # Create user_read_history table
     conn.execute("""
-        CREATE TABLE user_read_papers (
+        CREATE TABLE user_read_history (
             user_id INTEGER,
-            doi VARCHAR
+            paper_id VARCHAR,
+            read_at DATE DEFAULT CURRENT_DATE,
+            UNIQUE(user_id, paper_id)
         )
     """)
 
+    # Create user_publications table
     conn.execute("""
-        CREATE TABLE user_candidates (
+        CREATE TABLE user_publications (
+            id INTEGER PRIMARY KEY,
             user_id INTEGER,
-            doi VARCHAR
+            title VARCHAR,
+            venue VARCHAR,
+            year INTEGER,
+            doi VARCHAR,
+            citation_count INTEGER DEFAULT 0,
+            coauthors VARCHAR[],
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -195,7 +256,11 @@ def create_test_database():
 
     for paper in sample_papers:
         conn.execute("""
-            INSERT INTO papers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO papers (
+                id, submitter, authors, title, comments, "journal-ref", doi, "report-no",
+                categories, license, abstract, versions, update_date, authors_parsed,
+                author_ids, deleted, citations, citation_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, [
             paper['id'], paper['submitter'], paper['authors'], paper['title'],
             paper['comments'], paper['journal-ref'], paper['doi'], paper['report-no'],

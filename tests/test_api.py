@@ -114,27 +114,28 @@ class TestPapers:
         assert isinstance(data['count'], int)
 
     def test_get_paper_by_doi(self, client, db):
-        """Test getting a specific paper by DOI."""
-        # Get a valid DOI first
+        """Test getting a specific paper by arXiv ID."""
+        # Get a valid paper ID first
         result = db.execute("""
-            SELECT doi FROM papers
-            WHERE doi IS NOT NULL
+            SELECT id FROM papers
+            WHERE id IS NOT NULL
             AND (deleted = false OR deleted IS NULL)
             LIMIT 1
         """).fetchone()
 
         if result:
-            doi = result[0]
-            # URL encode the DOI
+            paper_id = result[0]
+            # URL encode the ID
             from urllib.parse import quote
-            encoded_doi = quote(doi, safe='')
+            encoded_id = quote(paper_id, safe='')
 
-            response = client.get(f'/api/papers/{encoded_doi}')
+            response = client.get(f'/api/papers/{encoded_id}')
             assert response.status_code == 200
             data = json.loads(response.data)
-            assert data['doi'].lower() == doi.lower()
+            assert data['id'] == paper_id
             assert 'title' in data
             assert 'abstract' in data
+            assert 'microtopics' in data
 
     def test_get_paper_not_found(self, client):
         """Test getting non-existent paper."""
@@ -342,20 +343,21 @@ class TestUsers:
         username = f'testuser_{int(time.time())}'
         user_data = {
             'username': username,
+            'email': f'{username}@test.com',
             'password': 'testpassword123'
         }
 
-        response = client.post('/api/users/register',
+        response = client.post('/api/auth/register',
                               data=json.dumps(user_data),
                               content_type='application/json')
         assert response.status_code == 201
         data = json.loads(response.data)
-        assert data['status'] == 'created'
         assert 'user_id' in data
+        assert 'session_token' in data
 
     def test_register_missing_fields(self, client):
         """Test registration with missing fields."""
-        response = client.post('/api/users/register',
+        response = client.post('/api/auth/register',
                               data=json.dumps({'username': 'test'}),
                               content_type='application/json')
         assert response.status_code == 400
@@ -367,16 +369,17 @@ class TestUsers:
         username = f'logintest_{int(time.time())}'
         password = 'testpass123'
 
-        reg_response = client.post('/api/users/register',
+        reg_response = client.post('/api/auth/register',
                                    data=json.dumps({
                                        'username': username,
+                                       'email': f'{username}@test.com',
                                        'password': password
                                    }),
                                    content_type='application/json')
         assert reg_response.status_code == 201
 
         # Now try to login
-        login_response = client.post('/api/users/login',
+        login_response = client.post('/api/auth/login',
                                      data=json.dumps({
                                          'username': username,
                                          'password': password
@@ -384,12 +387,11 @@ class TestUsers:
                                      content_type='application/json')
         assert login_response.status_code == 200
         data = json.loads(login_response.data)
-        assert data['status'] == 'authenticated'
         assert 'session_token' in data
 
     def test_login_invalid_credentials(self, client):
         """Test login with invalid credentials."""
-        response = client.post('/api/users/login',
+        response = client.post('/api/auth/login',
                               data=json.dumps({
                                   'username': 'nonexistent',
                                   'password': 'wrong'

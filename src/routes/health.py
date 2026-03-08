@@ -15,15 +15,17 @@ def health_check():
     """Health check endpoint with database connectivity test."""
     try:
         db = get_db()
-        # Test database connectivity
-        result = db.execute("SELECT COUNT(*) FROM papers").fetchone()
-        paper_count = result[0]
+        # Test database connectivity and get counts
+        paper_count = db.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
+        author_count = db.execute("SELECT COUNT(*) FROM authors").fetchone()[0]
+        microtopic_count = db.execute("SELECT COUNT(*) FROM microtopics").fetchone()[0]
 
         return jsonify({
             "status": "healthy",
             "database": "connected",
-            "database_path": DATABASE_PATH,
-            "paper_count": paper_count
+            "paper_count": paper_count,
+            "author_count": author_count,
+            "microtopic_count": microtopic_count
         }), 200
     except Exception as e:
         return jsonify({

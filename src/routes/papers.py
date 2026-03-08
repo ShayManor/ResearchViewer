@@ -6,55 +6,80 @@ papers_bp = Blueprint("papers", __name__)
 
 @papers_bp.route("/api/papers", methods=["GET"])
 def get_papers():
-    """Get all papers with optional filters (subject, journal, date range, keyword). Supports pagination and sorting."""
+    """Get all papers with optional filters. Supports pagination and sorting."""
     db = get_db()
 
     # Get query parameters
-    subject = request.args.get('subject')
-    journal = request.args.get('journal')
     keyword = request.args.get('keyword')
+    subject = request.args.get('subject')
+    author = request.args.get('author')
+    microtopic_id = request.args.get('microtopic_id')
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
+    min_citations = request.args.get('min_citations')
+    max_citations = request.args.get('max_citations')
     page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 20))
+    per_page = min(int(request.args.get('per_page', 20)), 100)  # Max 100
 
     # Validate sort_by field
-    allowed_sort_fields = ['update_date', 'citation_count', 'title', 'id']
-    sort_by = request.args.get('sort_by', 'update_date')
+    allowed_sort_fields = ['citation_count', 'update_date', 'title']
+    sort_by = request.args.get('sort_by', 'citation_count')
     if sort_by not in allowed_sort_fields:
-        sort_by = 'update_date'
+        sort_by = 'citation_count'
 
     sort_order = request.args.get('sort_order', 'DESC')
     if sort_order not in ['ASC', 'DESC']:
         sort_order = 'DESC'
 
-    # Build query
-    query = "SELECT * FROM papers WHERE deleted = false OR deleted IS NULL"
-    params = []
+    # Build base query
+    if microtopic_id:
+        # Join with paper_microtopics for filtering by microtopic
+        base_query = """
+            SELECT DISTINCT p.* FROM papers p
+            INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
+            WHERE pm.microtopic_id = ?
+            AND (p.deleted = false OR p.deleted IS NULL)
+        """
+        params = [microtopic_id]
+    else:
+        base_query = "SELECT * FROM papers WHERE deleted = false OR deleted IS NULL"
+        params = []
+
+    # Add filters
+    if keyword:
+        base_query += " AND (title ILIKE ? OR abstract ILIKE ? OR authors ILIKE ?)"
+        params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
 
     if subject:
-        query += " AND categories LIKE ?"
+        base_query += " AND categories LIKE ?"
         params.append(f"%{subject}%")
 
-    if journal:
-        query += " AND \"journal-ref\" LIKE ?"
-        params.append(f"%{journal}%")
-
-    if keyword:
-        query += " AND (title LIKE ? OR abstract LIKE ?)"
-        params.append(f"%{keyword}%")
-        params.append(f"%{keyword}%")
+    if author:
+        base_query += " AND authors ILIKE ?"
+        params.append(f"%{author}%")
 
     if start_date:
-        query += " AND update_date >= ?"
+        base_query += " AND update_date >= ?"
         params.append(start_date)
 
     if end_date:
-        query += " AND update_date <= ?"
+        base_query += " AND update_date <= ?"
         params.append(end_date)
 
+    if min_citations:
+        base_query += " AND citation_count >= ?"
+        params.append(int(min_citations))
+
+    if max_citations:
+        base_query += " AND citation_count <= ?"
+        params.append(int(max_citations))
+
+    # Get total count
+    count_query = base_query.replace("SELECT DISTINCT p.*", "SELECT COUNT(DISTINCT p.id)").replace("SELECT *", "SELECT COUNT(*)")
+    total = db.execute(count_query, params).fetchone()[0]
+
     # Add sorting and pagination
-    query += f" ORDER BY {sort_by} {sort_order} LIMIT ? OFFSET ?"
+    query = base_query + f" ORDER BY {sort_by} {sort_order} LIMIT ? OFFSET ?"
     params.append(per_page)
     params.append((page - 1) * per_page)
 
@@ -63,38 +88,51 @@ def get_papers():
     return jsonify({
         "papers": df_to_json_serializable(result),
         "page": page,
-        "per_page": per_page
+        "per_page": per_page,
+        "total": total
     })
 
 
 @papers_bp.route("/api/count_papers", methods=["GET"])
 def count_papers():
-    """Get number of papers with optional filters (subject, journal, date range, keyword)."""
+    """Get number of papers with optional filters."""
     db = get_db()
 
-    # Get query parameters
-    subject = request.args.get('subject')
-    journal = request.args.get('journal')
+    # Get query parameters (same as get_papers)
     keyword = request.args.get('keyword')
+    subject = request.args.get('subject')
+    author = request.args.get('author')
+    microtopic_id = request.args.get('microtopic_id')
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
+    min_citations = request.args.get('min_citations')
+    max_citations = request.args.get('max_citations')
 
     # Build query
-    query = "SELECT COUNT(*) as count FROM papers WHERE deleted = false OR deleted IS NULL"
-    params = []
+    if microtopic_id:
+        query = """
+            SELECT COUNT(DISTINCT p.id) FROM papers p
+            INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
+            WHERE pm.microtopic_id = ?
+            AND (p.deleted = false OR p.deleted IS NULL)
+        """
+        params = [microtopic_id]
+    else:
+        query = "SELECT COUNT(*) FROM papers WHERE deleted = false OR deleted IS NULL"
+        params = []
+
+    # Add filters
+    if keyword:
+        query += " AND (title ILIKE ? OR abstract ILIKE ? OR authors ILIKE ?)"
+        params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
 
     if subject:
         query += " AND categories LIKE ?"
         params.append(f"%{subject}%")
 
-    if journal:
-        query += " AND \"journal-ref\" LIKE ?"
-        params.append(f"%{journal}%")
-
-    if keyword:
-        query += " AND (title LIKE ? OR abstract LIKE ?)"
-        params.append(f"%{keyword}%")
-        params.append(f"%{keyword}%")
+    if author:
+        query += " AND authors ILIKE ?"
+        params.append(f"%{author}%")
 
     if start_date:
         query += " AND update_date >= ?"
@@ -104,25 +142,53 @@ def count_papers():
         query += " AND update_date <= ?"
         params.append(end_date)
 
+    if min_citations:
+        query += " AND citation_count >= ?"
+        params.append(int(min_citations))
+
+    if max_citations:
+        query += " AND citation_count <= ?"
+        params.append(int(max_citations))
+
     result = db.execute(query, params).fetchone()
 
     return jsonify({"count": result[0]})
 
 
-@papers_bp.route("/api/papers/<path:doi>", methods=["GET"])
-def get_paper(doi):
-    """Get single paper by DOI. Returns title, abstract, authors, citations, keywords, journal, subject, submission time."""
+@papers_bp.route("/api/papers/<path:paper_id>", methods=["GET"])
+def get_paper(paper_id):
+    """Get single paper by arXiv ID. Returns full paper details including microtopics."""
     db = get_db()
 
+    # Get paper details
     result = db.execute(
-        "SELECT * FROM papers WHERE lower(doi) = lower(?) AND (deleted = false OR deleted IS NULL)",
-        [doi]
+        "SELECT * FROM papers WHERE id = ? AND (deleted = false OR deleted IS NULL)",
+        [paper_id]
     ).fetchdf()
 
     if result.empty:
         return jsonify({"error": "Paper not found"}), 404
 
     paper = df_to_json_serializable(result)[0]
+
+    # Get microtopics for this paper
+    microtopics_result = db.execute("""
+        SELECT
+            m.microtopic_id,
+            m.label,
+            pm.score,
+            pm.is_primary
+        FROM paper_microtopics pm
+        INNER JOIN microtopics m ON pm.microtopic_id = m.microtopic_id
+        WHERE pm.paper_id = ?
+        ORDER BY pm.score DESC
+    """, [paper_id]).fetchdf()
+
+    if not microtopics_result.empty:
+        paper['microtopics'] = df_to_json_serializable(microtopics_result)
+    else:
+        paper['microtopics'] = []
+
     return jsonify(paper)
 
 
@@ -239,49 +305,93 @@ def generate_paper():
     return jsonify({"error": "Not implemented yet"}), 501
 
 
-@papers_bp.route("/api/papers/<path:doi>/citations", methods=["GET"])
-def get_paper_citations(doi):
-    """Get all papers that cite this paper."""
+@papers_bp.route("/api/papers/<path:paper_id>/citations", methods=["GET"])
+def get_paper_citations(paper_id):
+    """Get all papers that cite this paper. Papers whose citations array contains this ID."""
     db = get_db()
 
-    # Find papers where this DOI is in their citations array
-    result = db.execute("""
+    # Get query parameters for pagination and sorting
+    page = int(request.args.get('page', 1))
+    per_page = min(int(request.args.get('per_page', 20)), 100)
+    sort_by = request.args.get('sort_by', 'citation_count')
+    sort_order = request.args.get('sort_order', 'DESC')
+
+    # Validate sort field
+    allowed_sort_fields = ['citation_count', 'update_date', 'title']
+    if sort_by not in allowed_sort_fields:
+        sort_by = 'citation_count'
+
+    if sort_order not in ['ASC', 'DESC']:
+        sort_order = 'DESC'
+
+    # Get total count
+    count = db.execute("""
+        SELECT COUNT(*) FROM papers
+        WHERE list_contains(citations, ?)
+        AND (deleted = false OR deleted IS NULL)
+    """, [paper_id]).fetchone()[0]
+
+    # Get paginated results
+    result = db.execute(f"""
         SELECT * FROM papers
         WHERE list_contains(citations, ?)
         AND (deleted = false OR deleted IS NULL)
-    """, [doi]).fetchdf()
+        ORDER BY {sort_by} {sort_order}
+        LIMIT ? OFFSET ?
+    """, [paper_id, per_page, (page - 1) * per_page]).fetchdf()
 
     return jsonify({
         "citing_papers": df_to_json_serializable(result),
-        "count": len(result)
+        "count": count,
+        "page": page,
+        "per_page": per_page
     })
 
 
-@papers_bp.route("/api/papers/<path:doi>/references", methods=["GET"])
-def get_paper_references(doi):
-    """Get all papers this paper cites."""
+@papers_bp.route("/api/papers/<path:paper_id>/references", methods=["GET"])
+def get_paper_references(paper_id):
+    """Get all papers this paper cites. Look up each ID in the paper's citations array."""
     db = get_db()
+
+    # Get query parameters for pagination
+    page = int(request.args.get('page', 1))
+    per_page = min(int(request.args.get('per_page', 20)), 100)
 
     # Get the paper's citations array
     paper = db.execute(
-        "SELECT citations FROM papers WHERE lower(doi) = lower(?)",
-        [doi]
+        "SELECT citations FROM papers WHERE id = ?",
+        [paper_id]
     ).fetchone()
 
     if not paper or not paper[0]:
-        return jsonify({"references": [], "count": 0})
+        return jsonify({"references": [], "count": 0, "page": page, "per_page": per_page})
 
     citations = paper[0]
 
-    # Get papers with DOIs in the citations list
+    if not citations:
+        return jsonify({"references": [], "count": 0, "page": page, "per_page": per_page})
+
+    # Get papers with IDs in the citations list (with pagination)
     placeholders = ','.join(['?'] * len(citations))
+
+    # Get total count
+    count = db.execute(f"""
+        SELECT COUNT(*) FROM papers
+        WHERE id IN ({placeholders})
+        AND (deleted = false OR deleted IS NULL)
+    """, citations).fetchone()[0]
+
+    # Get paginated results
     result = db.execute(f"""
         SELECT * FROM papers
-        WHERE lower(doi) IN ({placeholders})
+        WHERE id IN ({placeholders})
         AND (deleted = false OR deleted IS NULL)
-    """, [c.lower() for c in citations]).fetchdf()
+        LIMIT ? OFFSET ?
+    """, citations + [per_page, (page - 1) * per_page]).fetchdf()
 
     return jsonify({
         "references": df_to_json_serializable(result),
-        "count": len(result)
+        "count": count,
+        "page": page,
+        "per_page": per_page
     })

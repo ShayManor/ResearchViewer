@@ -40,22 +40,47 @@ def get_authors():
 
 @authors_bp.route("/api/authors/search", methods=["GET"])
 def search_authors():
-    """Search authors by partial name match. Returns list of candidates."""
+    """Search authors by partial name match with optional filters."""
     db = get_db()
 
     name_query = request.args.get('name', '')
-    limit = int(request.args.get('limit', 10))
+    min_h_index = request.args.get('min_h_index')
+    min_works = request.args.get('min_works')
+    sort_by = request.args.get('sort_by', 'cited_by_count')
+    sort_order = request.args.get('sort_order', 'DESC')
+    limit = min(int(request.args.get('limit', 10)), 50)
 
     if not name_query:
         return jsonify({"error": "Name query parameter is required"}), 400
 
-    result = db.execute("""
+    # Validate sort field
+    allowed_sorts = ['cited_by_count', 'h_index', 'works_count', 'name']
+    if sort_by not in allowed_sorts:
+        sort_by = 'cited_by_count'
+
+    if sort_order not in ['ASC', 'DESC']:
+        sort_order = 'DESC'
+
+    # Build query
+    query = """
         SELECT author_id, name, h_index, works_count, cited_by_count
         FROM authors
         WHERE name ILIKE ?
-        ORDER BY cited_by_count DESC
-        LIMIT ?
-    """, [f"%{name_query}%", limit]).fetchdf()
+    """
+    params = [f"%{name_query}%"]
+
+    if min_h_index:
+        query += " AND h_index >= ?"
+        params.append(int(min_h_index))
+
+    if min_works:
+        query += " AND works_count >= ?"
+        params.append(int(min_works))
+
+    query += f" ORDER BY {sort_by} {sort_order} LIMIT ?"
+    params.append(limit)
+
+    result = db.execute(query, params).fetchdf()
 
     return jsonify({
         "authors": df_to_json_serializable(result),
@@ -65,9 +90,10 @@ def search_authors():
 
 @authors_bp.route("/api/authors/<path:author_id>", methods=["GET"])
 def get_author(author_id):
-    """Get author by OpenAlex/ORCID ID. Returns: name, papers, h-index, website, title, image."""
+    """Get full author details with aggregated statistics."""
     db = get_db()
 
+    # Get basic author info
     result = db.execute(
         "SELECT * FROM authors WHERE author_id = ?",
         [author_id]
@@ -77,6 +103,76 @@ def get_author(author_id):
         return jsonify({"error": "Author not found"}), 404
 
     author = df_to_json_serializable(result)[0]
+
+    # Get author's papers
+    paper_dois = author.get('paper_dois', [])
+
+    if paper_dois:
+        placeholders = ','.join(['?'] * len(paper_dois))
+
+        # Get top papers by citations
+        top_papers = db.execute(f"""
+            SELECT id, title, citation_count, update_date
+            FROM papers
+            WHERE id IN ({placeholders})
+            AND (deleted = false OR deleted IS NULL)
+            ORDER BY citation_count DESC
+            LIMIT 10
+        """, paper_dois).fetchdf()
+
+        author['top_papers'] = df_to_json_serializable(top_papers)
+
+        # Papers by year
+        papers_by_year = db.execute(f"""
+            SELECT
+                strftime(update_date, '%Y') as year,
+                COUNT(*) as count
+            FROM papers
+            WHERE id IN ({placeholders})
+            AND update_date IS NOT NULL
+            AND (deleted = false OR deleted IS NULL)
+            GROUP BY year
+            ORDER BY year
+        """, paper_dois).fetchdf()
+
+        author['papers_by_year'] = df_to_json_serializable(papers_by_year)
+
+        # Citations by year (sum of citations for papers published in each year)
+        citations_by_year = db.execute(f"""
+            SELECT
+                strftime(update_date, '%Y') as year,
+                SUM(citation_count) as citations
+            FROM papers
+            WHERE id IN ({placeholders})
+            AND update_date IS NOT NULL
+            AND (deleted = false OR deleted IS NULL)
+            GROUP BY year
+            ORDER BY year
+        """, paper_dois).fetchdf()
+
+        author['citations_by_year'] = df_to_json_serializable(citations_by_year)
+
+        # Primary topics
+        primary_topics = db.execute(f"""
+            SELECT
+                primary_topic_name as topic_name,
+                COUNT(*) as paper_count
+            FROM papers
+            WHERE id IN ({placeholders})
+            AND primary_topic_name IS NOT NULL
+            AND (deleted = false OR deleted IS NULL)
+            GROUP BY primary_topic_name
+            ORDER BY paper_count DESC
+            LIMIT 10
+        """, paper_dois).fetchdf()
+
+        author['primary_topics'] = df_to_json_serializable(primary_topics)
+    else:
+        author['top_papers'] = []
+        author['papers_by_year'] = []
+        author['citations_by_year'] = []
+        author['primary_topics'] = []
+
     return jsonify(author)
 
 
