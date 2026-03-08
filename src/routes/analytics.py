@@ -360,3 +360,55 @@ def citation_graph():
         "node_count": len(nodes),
         "edge_count": len(edges)
     })
+
+@analytics.route("/api/analytics/domains", methods=["GET"])
+def domains():
+    """Get paper counts grouped by primary_domain_name."""
+    db = get_db()
+    limit = int(request.args.get('limit', 100))
+
+    result = db.execute("""
+        SELECT
+            primary_domain_name as domain,
+            COUNT(*) as paper_count,
+            ROUND(AVG(citation_count), 0) as avg_citations,
+            SUM(citation_count) as total_citations
+        FROM papers
+        WHERE primary_domain_name IS NOT NULL
+        AND primary_domain_name != ''
+        AND (deleted = false OR deleted IS NULL)
+        GROUP BY primary_domain_name
+        ORDER BY paper_count DESC
+        LIMIT ?
+    """, [limit]).fetchdf()
+
+    return jsonify({"domains": df_to_json_serializable(result)})
+
+
+@analytics.route("/api/analytics/topics", methods=["GET"])
+def topics_in_domain():
+    """Get paper counts grouped by primary_topic_name within a domain."""
+    db = get_db()
+    domain = request.args.get('domain')
+    limit = int(request.args.get('limit', 100))
+
+    if not domain:
+        return jsonify({"error": "domain query param is required"}), 400
+
+    result = db.execute("""
+        SELECT
+            primary_topic_name as topic,
+            COUNT(*) as paper_count,
+            ROUND(AVG(citation_count), 0) as avg_citations,
+            SUM(citation_count) as total_citations
+        FROM papers
+        WHERE primary_domain_name = ?
+        AND primary_topic_name IS NOT NULL
+        AND primary_topic_name != ''
+        AND (deleted = false OR deleted IS NULL)
+        GROUP BY primary_topic_name
+        ORDER BY paper_count DESC
+        LIMIT ?
+    """, [domain, limit]).fetchdf()
+
+    return jsonify({"topics": df_to_json_serializable(result)})
