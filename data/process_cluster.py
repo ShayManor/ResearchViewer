@@ -77,7 +77,7 @@ DEFAULT_DB = "../src/data.db"
 DEFAULT_BUCKET_COLUMN = "primary_topic_name"
 DEFAULT_TOPK_ASSIGNMENTS = 1
 DEFAULT_SECONDARY_RATIO = 0.92
-DEFAULT_MIN_DOCS = 40
+DEFAULT_MIN_DOCS = 20
 DEFAULT_MAX_DOCS_FOR_CLUSTER_SELECTION = 4000
 DEFAULT_SEED = 42
 
@@ -219,27 +219,6 @@ def ensure_tables(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_paper_microtopics_bucket ON paper_microtopics(bucket_column, bucket_value)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_paper_microtopics_paper ON paper_microtopics(paper_id)")
-
-
-# ── Data loading ──────────────────────────────────────────────────────────────
-def get_all_bucket_values(conn: duckdb.DuckDBPyConnection, bucket_column: str, min_docs: int) -> list[str]:
-    rows = conn.execute(f"""
-        SELECT {bucket_column}, COUNT(*) AS cnt
-        FROM papers
-        WHERE deleted IS NOT TRUE
-          AND {bucket_column} IS NOT NULL
-          AND (title IS NOT NULL OR abstract IS NOT NULL)
-        GROUP BY {bucket_column}
-        HAVING cnt >= ?
-        ORDER BY cnt DESC
-    """, [min_docs]).fetchall()
-    values = [r[0] for r in rows]
-    print(f"[all] Found {len(values)} bucket values in '{bucket_column}' with >= {min_docs} docs", file=sys.stderr)
-    for name, cnt in rows[:10]:
-        print(f"       {cnt:>7,}  {name}", file=sys.stderr)
-    if len(rows) > 10:
-        print(f"       ... and {len(rows) - 10} more", file=sys.stderr)
-    return values
 
 
 def load_all_papers(conn: duckdb.DuckDBPyConnection, bucket_column: str) -> pd.DataFrame:
@@ -656,9 +635,9 @@ def merge_small_clusters(
 
 
 def merge_similar_clusters(
-    labels: np.ndarray,
-    centers: np.ndarray,
-    min_similarity: float = 0.965,
+        labels: np.ndarray,
+        centers: np.ndarray,
+        min_similarity: float = 0.965,
 ) -> np.ndarray:
     """
     Merge only mutually nearest clusters above a very high similarity threshold.
@@ -1157,55 +1136,18 @@ def print_bucket_summary(microtopics_df: pd.DataFrame, keyword_map_json: bool = 
         print(f"    [{row['size']:>5}] {row['label']:30s} | {', '.join(terms)}")
 
 
-# ── Single-bucket pipeline ────────────────────────────────────────────────────
 def run_pipeline(args: argparse.Namespace) -> None:
     conn = duckdb.connect(args.db)
     try:
         ensure_tables(conn)
-        print(f"\n[bucket] {args.bucket_column} = {args.bucket_value!r}", file=sys.stderr)
-        df = load_bucket_papers(conn, args.bucket_column, args.bucket_value, args.limit)
-        if len(df) < args.min_docs:
+        ok = process_single_bucket(conn, args, args.bucket_value)
+        if not ok:
             raise RuntimeError(
-                f"Need >= {args.min_docs} docs in {args.bucket_column}={args.bucket_value!r}; found {len(df)}"
+                f"Need >= {args.min_docs} docs in {args.bucket_column}={args.bucket_value!r}"
             )
-        print(f"[bucket] {len(df):,} usable documents", file=sys.stderr)
-
-        texts = build_paper_texts_for_embeddings(df)
-        embeddings, meta = build_embeddings(texts, args.embedding_backend, args.embedding_model, args.seed)
-        artifacts = choose_k_and_cluster(
-            embeddings,
-            args.seed,
-            args.max_docs_for_cluster_selection,
-            knn_k=args.knn_k if args.knn_k is not None else choose_knn_k(len(df)),
-            leiden_resolution=args.leiden_resolution,
-            leiden_iterations=args.leiden_iterations,
-            min_cluster_size=args.min_cluster_size,
-        )
-        df["cluster_id"] = artifacts.labels
-
-        microtopics_df, _ = write_results(
-            conn=conn,
-            df=df,
-            bucket_column=args.bucket_column,
-            bucket_value=args.bucket_value,
-            cluster_scores=artifacts.scores,
-            cluster_centers=artifacts.centers,
-            backend_name=meta["backend"],
-            topk_assignments=args.topk_assignments,
-            secondary_ratio=args.secondary_ratio,
-            replace_bucket=(not args.append),
-        )
-        conn.commit()
-
-        print(f"\n[result] Bucket: {args.bucket_column} = {args.bucket_value}")
-        print(f"[result] Documents: {len(df):,}  |  Clusters: {artifacts.k}  |  Backend: {meta['backend']}")
-        print("[result] Microtopics:")
-        print_bucket_summary(microtopics_df)
-
-        if args.write_bucket_summary_json:
-            _write_summary_json(args, microtopics_df, df, artifacts, meta)
     finally:
         conn.close()
+
 
 def disambiguate_duplicate_labels(microtopics_df: pd.DataFrame) -> pd.DataFrame:
     df = microtopics_df.copy()
@@ -1268,92 +1210,59 @@ def disambiguate_duplicate_labels(microtopics_df: pd.DataFrame) -> pd.DataFrame:
     df["label"] = new_labels
     return df
 
-# ── All-buckets pipeline ──────────────────────────────────────────────────────
+
 def run_all_buckets_pipeline(args: argparse.Namespace) -> None:
-    t_total = time.time()
     conn = duckdb.connect(args.db)
-    ensure_tables(conn)
+    try:
+        ensure_tables(conn)
 
-    bucket_values = get_all_bucket_values(conn, args.bucket_column, args.min_docs)
-    if not bucket_values:
-        raise RuntimeError("No eligible bucket values found.")
+        bucket_values = get_all_bucket_values(conn, args.bucket_column, args.min_docs)
+        if not bucket_values:
+            raise RuntimeError("No eligible bucket values found.")
 
-    # ── Step 1: Load & embed ALL papers at once ──────────────────────────────
-    print(f"\n[pipeline] Step 1/3 — Load + embed all papers", file=sys.stderr)
-    all_df = load_all_papers(conn, args.bucket_column)
-    texts = build_paper_texts_for_embeddings(all_df)
-    embeddings, meta = build_embeddings(texts, args.embedding_backend, args.embedding_model, args.seed)
+        print(f"\n[all] Processing {len(bucket_values)} values from {args.bucket_column}", file=sys.stderr)
 
-    # Build bucket → slice index once
-    bucket_to_idx: dict[str, np.ndarray] = {}
-    for bv, grp in all_df.groupby("bucket_value"):
-        bucket_to_idx[bv] = grp.index.to_numpy()
+        done = 0
+        skipped = 0
 
-    # ── Step 2: Cluster each bucket in parallel (CPU threads) ────────────────
-    print(f"\n[pipeline] Step 2/3 — Clustering {len(bucket_values)} buckets (parallel)", file=sys.stderr)
-
-    def cluster_bucket(bv: str) -> tuple[str, Optional[tuple], str]:
-        idx = bucket_to_idx.get(bv)
-        if idx is None or len(idx) < args.min_docs:
-            return bv, None, f"skipped ({len(idx) if idx is not None else 0} docs)"
-        df_b = all_df.iloc[idx].reset_index(drop=True)
-        emb_b = embeddings[idx]
-        t0 = time.time()
-        artifacts = choose_k_and_cluster(
-            emb_b,
-            args.seed,
-            args.max_docs_for_cluster_selection,
-            knn_k=args.knn_k,
-            leiden_resolution=args.leiden_resolution,
-            leiden_iterations=args.leiden_iterations,
-        )
-        df_b["cluster_id"] = artifacts.labels
-        return bv, (df_b, artifacts), f"k={artifacts.k}, n={len(df_b):,} in {time.time() - t0:.1f}s"
-
-    # Use threads (GIL released in numpy/cuml; silhouette_score is the bottleneck)
-    max_workers = min(args.cluster_workers, os.cpu_count() or 4)
-    print(f"[pipeline] Cluster workers: {max_workers}", file=sys.stderr)
-    clustered: list[tuple[str, tuple]] = []
-    skipped = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(cluster_bucket, bv): bv for bv in bucket_values}
-        pbar = tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Clustering", file=sys.stderr)
-        for fut in pbar:
-            bv, payload, msg = fut.result()
-            if payload:
-                clustered.append((bv, payload))
-                pbar.set_postfix_str(f"ok={len(clustered)} skip={skipped}")
-            else:
+        for bucket_value in tqdm(bucket_values, desc="Buckets", file=sys.stderr):
+            try:
+                ok = process_single_bucket(conn, args, bucket_value)
+                if ok:
+                    done += 1
+                else:
+                    skipped += 1
+            except Exception as e:
                 skipped += 1
-                print(f"  [skip] {bv}: {msg}", file=sys.stderr)
+                print(f"[error] {bucket_value!r}: {e}", file=sys.stderr)
 
-    print(f"[pipeline] Clustered {len(clustered)}, skipped {skipped}", file=sys.stderr)
+        print(f"\n[all] Done. processed={done}, skipped={skipped}", file=sys.stderr)
+    finally:
+        conn.close()
 
-    # ── Step 3: Write to DB sequentially ─────────────────────────────────────
-    print(f"\n[pipeline] Step 3/3 — Writing {len(clustered)} buckets to DB ...", file=sys.stderr)
-    for bv, (df_b, artifacts) in tqdm(clustered, desc="Writing", file=sys.stderr):
-        microtopics_df, _ = write_results(
-            conn=conn,
-            df=df_b,
-            bucket_column=args.bucket_column,
-            bucket_value=bv,
-            cluster_scores=artifacts.scores,
-            cluster_centers=artifacts.centers,
-            backend_name=meta["backend"],
-            topk_assignments=args.topk_assignments,
-            secondary_ratio=args.secondary_ratio,
-            replace_bucket=(not args.append),
-        )
-        preview = microtopics_df.sort_values("size", ascending=False)
-        labels = [f"{r['label']}({r['size']})" for _, r in preview.iterrows()]
-        print(f"  [write] {bv!r:40s} → {', '.join(labels)}", file=sys.stderr)
-    conn.commit()
-    conn.close()
 
-    elapsed = time.time() - t_total
+def get_all_bucket_values(conn, bucket_column, min_docs):
+    rows = conn.execute(f"""
+        SELECT {bucket_column}, COUNT(*) AS cnt
+        FROM papers
+        WHERE deleted IS NOT TRUE
+          AND {bucket_column} IS NOT NULL
+          AND (title IS NOT NULL OR abstract IS NOT NULL)
+        GROUP BY {bucket_column}
+        HAVING COUNT(*) >= ?
+        ORDER BY cnt DESC
+    """, [min_docs]).fetchall()
+
+    values = [r[0] for r in rows if r[0] is not None]
+
     print(
-        f"\n[pipeline] ✓ Done — {len(clustered)} buckets in {elapsed:.1f}s ({elapsed / max(len(clustered), 1):.1f}s/bucket avg)",
-        file=sys.stderr)
+        f"[all] Found {len(values)} bucket values in {bucket_column!r} with >= {min_docs} docs",
+        file=sys.stderr,
+    )
+    for name, cnt in rows[:10]:
+        print(f"       {cnt:>7,}  {name}", file=sys.stderr)
+
+    return values
 
 
 # ── JSON summary helper ───────────────────────────────────────────────────────
@@ -1457,6 +1366,62 @@ def score_partition(stats: dict, n_docs: int, min_cluster_size: int) -> float:
     return score
 
 
+def process_single_bucket(
+        conn: duckdb.DuckDBPyConnection,
+        args: argparse.Namespace,
+        bucket_value: str,
+) -> bool:
+    print(f"\n[bucket] {args.bucket_column} = {bucket_value!r}", file=sys.stderr)
+
+    df = load_bucket_papers(conn, args.bucket_column, bucket_value, args.limit)
+    if len(df) < args.min_docs:
+        print(f"[skip] {bucket_value!r}: only {len(df)} usable docs", file=sys.stderr)
+        return False
+
+    print(f"[bucket] {len(df):,} usable documents", file=sys.stderr)
+
+    texts = build_paper_texts_for_embeddings(df)
+    embeddings, meta = build_embeddings(
+        texts,
+        args.embedding_backend,
+        args.embedding_model,
+        args.seed,
+    )
+
+    knn_k = args.knn_k if args.knn_k is not None else choose_knn_k(len(df))
+
+    artifacts = choose_k_and_cluster(
+        embeddings,
+        args.seed,
+        args.max_docs_for_cluster_selection,
+        knn_k=knn_k,
+        leiden_resolution=args.leiden_resolution,
+        leiden_iterations=args.leiden_iterations,
+        min_cluster_size=args.min_cluster_size,
+    )
+
+    df["cluster_id"] = artifacts.labels
+
+    microtopics_df, _ = write_results(
+        conn=conn,
+        df=df,
+        bucket_column=args.bucket_column,
+        bucket_value=bucket_value,
+        cluster_scores=artifacts.scores,
+        cluster_centers=artifacts.centers,
+        backend_name=meta["backend"],
+        topk_assignments=args.topk_assignments,
+        secondary_ratio=args.secondary_ratio,
+        replace_bucket=(not args.append),
+    )
+    conn.commit()
+
+    print(f"[result] Bucket: {args.bucket_column} = {bucket_value}")
+    print(f"[result] Documents: {len(df):,}  |  Clusters: {artifacts.k}  |  Backend: {meta['backend']}")
+    print_bucket_summary(microtopics_df)
+    return True
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 def validate_bucket_column(column: str) -> None:
     if column not in BUCKET_COLUMN_ALLOWLIST:
@@ -1472,7 +1437,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", default=DEFAULT_DB, help="Path to DuckDB database")
     p.add_argument("--bucket-column", default=DEFAULT_BUCKET_COLUMN,
                    help=f"OpenAlex bucket column. One of: {', '.join(sorted(BUCKET_COLUMN_ALLOWLIST))}")
-    p.add_argument("--bucket-value", default="Natural Language Processing Techniques",
+    p.add_argument("--bucket-value", default="all",
                    help="Exact bucket value, or 'all' to process every bucket")
     p.add_argument("--limit", type=int, default=None, help="Cap docs per bucket (debug)")
     p.add_argument("--min-docs", type=int, default=DEFAULT_MIN_DOCS,
