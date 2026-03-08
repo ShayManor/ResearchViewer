@@ -19,9 +19,24 @@ def client():
 
 
 @pytest.fixture
-def db():
-    """Get database connection."""
-    return get_db()
+def app_ctx():
+    """Push Flask app context for tests that need g/current_app."""
+    app.config["TESTING"] = True
+    with app.app_context():
+        yield
+
+
+@pytest.fixture
+def client(app_ctx):
+    """Create a test client for the Flask app."""
+    with app.test_client() as client:
+        yield client
+
+
+@pytest.fixture
+def db(app_ctx):
+    """Get database connection inside Flask app context."""
+    yield get_db()
 
 
 class TestHealth:
