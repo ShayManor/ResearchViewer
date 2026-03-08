@@ -81,12 +81,10 @@ created_at,TIMESTAMP,YES,,CURRENT_TIMESTAMP,
 
 
 TODO:
-1) Cluster data and add topics
-2) Update db schema + APIs for frontend use
-3) Add complex APIs for reports and viewing graph
-4) Implement frontend
-5) Put API + Database onto GCE/Runpod that serves frontend
-6) HTTPS + Networking + Redis
+1) Fix frontend render issues
+2) Fix the many many bugs in the frontend
+3) Put API + Database onto GCE/Runpod that serves frontend 
+4) HTTPS + Networking + Redis
 ## Features
 
 ### Paper Analyzer
