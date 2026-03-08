@@ -126,11 +126,11 @@ def subjects_breakdown():
     # Extract primary category (first in the list) and calculate avg citations
     result = db.execute("""
         SELECT
-            SPLIT_PART(categories, ' ', 1) as subject,
+            primary_topic_name as subject,
             COUNT(*) as paper_count,
             ROUND(AVG(citation_count), 0) as avg_citations
         FROM papers
-        WHERE categories IS NOT NULL
+        WHERE primary_topic_name IS NOT NULL
         AND (deleted = false OR deleted IS NULL)
         GROUP BY subject
         ORDER BY paper_count DESC

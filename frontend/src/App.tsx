@@ -1,137 +1,163 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header';
-import { TopicGraph } from './components/TopicGraph';
-import { TopicDetailPanel } from './components/TopicDetailPanel';
+import { GraphView } from './components/GraphView';
+import { MicrotopicPanel } from './components/MicrotopicPanel';
 import { RightSidebar } from './components/RightSidebar';
 import { SearchDialog } from './components/SearchDialog';
 import { UserProfilePanel } from './components/UserProfilePanel';
-import { api } from './lib/api';
-import {
-  DUMMY_USER, buildTopicGraph, getRecommendations, SEED_PAPERS,
-  type TopicNode, type TopicEdge, type UserProfileData, type Publication,
-} from './lib/dummy-data';
+import { StatsBar } from './components/StatsBar';
+import { api, type SubjectEntry, type GraphNode, type GraphEdge, type VelocityRes } from './lib/api';
+
+// Hardcoded user ID — replace with auth when ready
+const USER_ID = 1;
 
 export default function App() {
-  const [topicNodes, setTopicNodes] = useState<TopicNode[]>([]);
-  const [topicEdges, setTopicEdges] = useState<TopicEdge[]>([]);
-  const [selectedTopic, setSelectedTopic] = useState<TopicNode | null>(null);
+  // API state
+  const [apiOnline, setApiOnline] = useState(false);
+  const [paperCount, setPaperCount] = useState<number | null>(null);
+  const [subjects, setSubjects] = useState<SubjectEntry[]>([]);
+  const [velocity, setVelocity] = useState<VelocityRes | null>(null);
+
+  // Graph drill-down: null = subjects level, string = microtopics for that subject
+  const [drillSubject, setDrillSubject] = useState<string | null>(null);
+  const [microNodes, setMicroNodes] = useState<GraphNode[]>([]);
+  const [microEdges, setMicroEdges] = useState<GraphEdge[]>([]);
+  const [microLoading, setMicroLoading] = useState(false);
+
+  // Selected microtopic
+  const [selectedMicrotopicId, setSelectedMicrotopicId] = useState<string | null>(null);
+
+  // Reading list DOIs (just IDs, for quick membership checks)
+  const [readingListIds, setReadingListIds] = useState<Set<string>>(new Set());
+
+  // Dialogs
   const [searchOpen, setSearchOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [user, setUser] = useState<UserProfileData>(DUMMY_USER);
-  const [recommendations, setRecommendations] = useState<ReturnType<typeof getRecommendations>>([]);
-  const [apiOnline, setApiOnline] = useState(false);
 
+  // ── Bootstrap ──────────────────────────────────────────────
   useEffect(() => {
-    const { nodes, edges } = buildTopicGraph();
-    setTopicNodes(nodes);
-    setTopicEdges(edges);
+    api.health()
+      .then(h => { setApiOnline(true); setPaperCount(h.paper_count); })
+      .catch(() => setApiOnline(false));
+    api.subjects(15).then(d => setSubjects(d.subjects)).catch(() => {});
+    api.velocity('week', 12).then(setVelocity).catch(() => {});
+    // Load reading list IDs
+    api.getReadingList(USER_ID).then(d => {
+      setReadingListIds(new Set(d.papers.map(p => p.id)));
+    }).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    api.health().then(() => setApiOnline(true)).catch(() => setApiOnline(false));
+  // ── Drill into microtopics for a subject ───────────────────
+  const drillInto = useCallback((subject: string) => {
+    setDrillSubject(subject);
+    setSelectedMicrotopicId(null);
+    setMicroLoading(true);
+    api.microtopicGraph({ bucket_value: subject, min_size: 3, limit: 60 })
+      .then(d => { setMicroNodes(d.nodes); setMicroEdges(d.edges); })
+      .catch(() => { setMicroNodes([]); setMicroEdges([]); })
+      .finally(() => setMicroLoading(false));
   }, []);
 
-  useEffect(() => {
-    setRecommendations(getRecommendations(user.readingList));
-  }, [user.readingList]);
+  const drillBack = useCallback(() => {
+    setDrillSubject(null);
+    setSelectedMicrotopicId(null);
+    setMicroNodes([]);
+    setMicroEdges([]);
+  }, []);
 
-  const addToReadingList = useCallback((doi: string) => {
-    setUser(prev => {
-      if (prev.readingList.includes(doi)) return prev;
-      return {
-        ...prev,
-        readingList: [...prev.readingList, doi],
-        readHistory: [...prev.readHistory, { doi, readDate: new Date().toISOString().slice(0, 10) }],
-      };
+  // ── Reading list mutations ─────────────────────────────────
+  const addToList = useCallback((paperId: string) => {
+    setReadingListIds(prev => new Set(prev).add(paperId));
+    api.addToReadingList(USER_ID, paperId).catch(() => {
+      setReadingListIds(prev => { const n = new Set(prev); n.delete(paperId); return n; });
     });
   }, []);
 
-  const removeFromReadingList = useCallback((doi: string) => {
-    setUser(prev => ({
-      ...prev,
-      readingList: prev.readingList.filter(d => d !== doi),
-    }));
+  const removeFromList = useCallback((paperId: string) => {
+    setReadingListIds(prev => { const n = new Set(prev); n.delete(paperId); return n; });
+    api.removeFromReadingList(USER_ID, paperId).catch(() => {
+      setReadingListIds(prev => new Set(prev).add(paperId));
+    });
   }, []);
 
-  const linkAuthor = useCallback((authorId: string, authorName: string) => {
-    setUser(prev => ({ ...prev, linkedAuthorId: authorId, linkedAuthorName: authorName }));
-  }, []);
-
-  const unlinkAuthor = useCallback(() => {
-    setUser(prev => ({ ...prev, linkedAuthorId: null, linkedAuthorName: null }));
-  }, []);
-
-  const addPublication = useCallback((pub: Publication) => {
-    setUser(prev => ({ ...prev, publications: [...prev.publications, pub] }));
-  }, []);
-
+  // ── Keyboard shortcut ──────────────────────────────────────
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setSearchOpen(true); }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setSearchOpen(true); } };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
   }, []);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <Header
-        username={user.username}
         onSearch={() => setSearchOpen(true)}
         onProfile={() => setProfileOpen(true)}
         apiOnline={apiOnline}
-        readCount={user.readingList.length}
+        readCount={readingListIds.size}
       />
 
       <div className="flex flex-1 overflow-hidden">
-        {selectedTopic && (
+        {/* Left: microtopic detail when selected */}
+        {selectedMicrotopicId && (
           <div className="w-[420px] shrink-0 border-r border-gray-200/80 overflow-hidden bg-white animate-slide-in">
-            <TopicDetailPanel
-              topic={selectedTopic}
-              allTopics={topicNodes}
-              onClose={() => setSelectedTopic(null)}
-              readingList={user.readingList}
-              onAddToList={addToReadingList}
-              onRemoveFromList={removeFromReadingList}
+            <MicrotopicPanel
+              microtopicId={selectedMicrotopicId}
+              allNodes={microNodes}
+              onClose={() => setSelectedMicrotopicId(null)}
+              readingListIds={readingListIds}
+              onAddToList={addToList}
+              onRemoveFromList={removeFromList}
+              userId={USER_ID}
             />
           </div>
         )}
 
+        {/* Center: graph */}
         <div className="flex-1 relative min-w-0">
-          <TopicGraph
-            nodes={topicNodes}
-            edges={topicEdges}
-            selectedTopicId={selectedTopic?.id || null}
-            onTopicClick={n => setSelectedTopic(prev => prev?.id === n.id ? null : n)}
+          <GraphView
+            subjects={subjects}
+            drillSubject={drillSubject}
+            microNodes={microNodes}
+            microEdges={microEdges}
+            microLoading={microLoading}
+            selectedMicrotopicId={selectedMicrotopicId}
+            onSubjectClick={drillInto}
+            onMicrotopicClick={setSelectedMicrotopicId}
+            onBack={drillBack}
           />
         </div>
 
+        {/* Right: reading list / hot / recs */}
         <div className="w-[300px] shrink-0 border-l border-gray-200/80 overflow-hidden bg-white">
           <RightSidebar
-            readingList={user.readingList}
-            recommendations={recommendations}
-            onRemoveFromList={removeFromReadingList}
-            onAddToList={addToReadingList}
+            userId={USER_ID}
+            readingListIds={readingListIds}
+            onRemoveFromList={removeFromList}
+            onAddToList={addToList}
+            velocity={velocity}
           />
         </div>
       </div>
 
-      {searchOpen && (
-        <SearchDialog onClose={() => setSearchOpen(false)} onSelectPaper={p => {
-          setSearchOpen(false);
-          const cat = p.categories?.split(/\s+/)[0];
-          if (cat) { const t = topicNodes.find(x => x.id === cat); if (t) setSelectedTopic(t); }
-        }} onAddToList={addToReadingList} readingList={user.readingList} />
-      )}
+      <StatsBar
+        paperCount={paperCount}
+        subjects={subjects}
+        drillSubject={drillSubject}
+        microNodeCount={microNodes.length}
+        microEdgeCount={microEdges.length}
+        velocity={velocity}
+        apiOnline={apiOnline}
+      />
 
-      {profileOpen && (
-        <UserProfilePanel
-          user={user}
-          onClose={() => setProfileOpen(false)}
-          onLinkAuthor={linkAuthor}
-          onUnlinkAuthor={unlinkAuthor}
-          onAddPublication={addPublication}
+      {searchOpen && (
+        <SearchDialog
+          onClose={() => setSearchOpen(false)}
+          onAddToList={addToList}
+          readingListIds={readingListIds}
         />
+      )}
+      {profileOpen && (
+        <UserProfilePanel userId={USER_ID} onClose={() => setProfileOpen(false)} />
       )}
     </div>
   );
