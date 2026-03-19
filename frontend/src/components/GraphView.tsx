@@ -262,13 +262,14 @@ export function GraphView({
             const isSel = level === 'micro' && node.id === selectedMicro;
             const isDim = level === 'micro' && selectedMicro && !isSel;
 
-            // Label: truncate based on node diameter
-            const maxChars = Math.floor((r * 2 - 12) / 5.8);
-            const displayLabel = node.label.length > maxChars ? node.label.slice(0, maxChars - 1) + '…' : node.label;
-            // Font size: scale with radius
-            const fontSize = level === 'micro'
-              ? Math.min(10, Math.max(7, r / 4.5))
-              : Math.min(13, Math.max(9, r / 3.8));
+            // Label: use full label, let CSS handle wrapping and truncation
+            const displayLabel = node.label;
+            // Font size: smaller to fit more text across multiple lines
+            const fontSize = level === 'domain'
+              ? Math.min(11, Math.max(8, r / 5))
+              : level === 'topic'
+                ? Math.min(9, Math.max(7, r / 5.5))
+                : Math.min(11, Math.max(8, r / 5));
 
             return (
               <div key={node.id} data-nid={node.id}
@@ -285,7 +286,7 @@ export function GraphView({
                 {/* Gloss */}
                 <div className="absolute rounded-full pointer-events-none" style={{ top: '8%', left: '15%', width: '50%', height: '30%', background: 'linear-gradient(180deg, rgba(255,255,255,0.6) 0%, transparent 100%)' }} />
                 {/* Label */}
-                <span className="font-sans font-bold leading-tight text-center px-1.5 break-words" style={{ fontSize: `${fontSize}px`, color: cat.text, maxWidth: r * 2 - 10, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: level === 'micro' ? 3 : 2, WebkitBoxOrient: 'vertical' as any }}>
+                <span className="font-sans font-bold leading-tight text-center px-1.5 break-words" style={{ fontSize: `${fontSize}px`, color: cat.text, maxWidth: r * 2 - 10, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: level === 'domain' ? 4 : level === 'topic' ? 5 : 6, WebkitBoxOrient: 'vertical' as any }}>
                   {displayLabel}
                 </span>
                 {/* Count */}

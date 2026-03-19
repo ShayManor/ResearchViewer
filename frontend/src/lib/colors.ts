@@ -48,31 +48,31 @@ export function fmtCit(n?: number | null): string {
 
 // Level 1: domain nodes
 export function domainRadius(paperCount: number): number {
-  if (paperCount >= 500000) return 60;
-  if (paperCount >= 100000) return 52;
-  if (paperCount >= 50000) return 44;
-  if (paperCount >= 10000) return 38;
-  if (paperCount >= 1000) return 32;
-  return 26;
+  if (paperCount >= 500000) return 90;
+  if (paperCount >= 100000) return 78;
+  if (paperCount >= 50000) return 66;
+  if (paperCount >= 10000) return 56;
+  if (paperCount >= 1000) return 48;
+  return 40;
 }
 
 // Level 2: topic nodes
 export function topicRadius(paperCount: number): number {
-  if (paperCount >= 50000) return 48;
-  if (paperCount >= 10000) return 42;
-  if (paperCount >= 5000) return 36;
-  if (paperCount >= 1000) return 30;
-  if (paperCount >= 100) return 24;
-  return 20;
+  if (paperCount >= 50000) return 70;
+  if (paperCount >= 10000) return 60;
+  if (paperCount >= 5000) return 52;
+  if (paperCount >= 1000) return 44;
+  if (paperCount >= 100) return 36;
+  return 30;
 }
 
 // Level 3: microtopic nodes — BIGGER than before
 export function microRadius(paperCount: number): number {
-  if (paperCount >= 500) return 52;
-  if (paperCount >= 200) return 46;
-  if (paperCount >= 100) return 40;
-  if (paperCount >= 50) return 36;
-  if (paperCount >= 20) return 32;
-  if (paperCount >= 10) return 28;
-  return 24;
+  if (paperCount >= 500) return 75;
+  if (paperCount >= 200) return 66;
+  if (paperCount >= 100) return 58;
+  if (paperCount >= 50) return 52;
+  if (paperCount >= 20) return 46;
+  if (paperCount >= 10) return 40;
+  return 35;
 }

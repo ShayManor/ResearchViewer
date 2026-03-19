@@ -75,7 +75,7 @@ export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListId
         </div>
         <div className="grid grid-cols-4 gap-1.5">
           <MM icon={<BookOpen size={9} />} label="Papers" value={String(st.paper_count)} />
-          <MM icon={<Quote size={9} />} label="Avg" value={fmtCit(st.avg_citations)} />
+          <MM icon={<Quote size={9} />} label="Avg" value={st.avg_citations != null ? st.avg_citations.toFixed(1) : '—'} />
           <MM icon={<TrendingUp size={9} />} label="Total" value={fmtCit(st.total_citations)} />
           <MM icon={<Calendar size={9} />} label="Span" value={st.year_range || '—'} />
         </div>
@@ -90,7 +90,13 @@ export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListId
           <div className="px-5 py-3 space-y-1.5">
             {detail.top_terms && detail.top_terms.length > 0 && (
               <div className="flex flex-wrap gap-1 mb-2">
-                {detail.top_terms.slice(0, 8).map(t => <span key={t} className="px-2 py-0.5 rounded-full text-[9px] font-medium bg-gray-100 text-gray-500">{t}</span>)}
+                {detail.top_terms.slice(0, 8).map((t, i) => {
+                  // Handle both string and object formats
+                  let termName = typeof t === 'string' ? t : String(t);
+                  // Remove confidence score and trailing punctuation (e.g., "kepler,0.8977..." -> "kepler")
+                  termName = termName.replace(/[,\s0-9.]+$/, '').trim();
+                  return <span key={i} className="px-2 py-0.5 rounded-full text-[9px] font-medium bg-gray-100 text-gray-500">{termName}</span>;
+                })}
               </div>
             )}
             {papers.map(p => {
@@ -156,7 +162,7 @@ export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListId
                     </tr></thead><tbody>
                       <CR label="Papers" a={st.paper_count} b={compareData.topic_b.stats.paper_count} />
                       <CR label="Total Cites" a={st.total_citations} b={compareData.topic_b.stats.total_citations} />
-                      <CR label="Avg Cites" a={st.avg_citations} b={compareData.topic_b.stats.avg_citations} />
+                      <CR label="Avg Cites" a={parseFloat(st.avg_citations.toFixed(1))} b={parseFloat(compareData.topic_b.stats.avg_citations.toFixed(1))} />
                       <CR label="Median" a={st.median_citations} b={compareData.topic_b.stats.median_citations} />
                       <CR label="Max" a={st.max_citations} b={compareData.topic_b.stats.max_citations} />
                     </tbody></table>
@@ -168,7 +174,7 @@ export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListId
                   <div className="grid grid-cols-4 gap-1.5">
                     <RC label="Papers" value={String(st.paper_count)} />
                     <RC label="Total" value={fmtCit(st.total_citations)} />
-                    <RC label="Avg" value={fmtCit(st.avg_citations)} />
+                    <RC label="Avg" value={st.avg_citations != null ? st.avg_citations.toFixed(1) : '—'} />
                     <RC label="Median" value={fmtCit(st.median_citations)} />
                     <RC label="Max" value={fmtCit(st.max_citations)} />
                     <RC label="Growth" value={`${Math.round(st.recent_growth_pct)}%`} />
