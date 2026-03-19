@@ -94,7 +94,7 @@ def get_microtopic_detail(microtopic_id):
 
     # Get papers in this microtopic for stats
     papers = db.execute("""
-        SELECT p.*
+        SELECT DISTINCT p.*
         FROM papers p
         INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
         WHERE pm.microtopic_id = ?
@@ -223,18 +223,18 @@ def get_microtopic_papers(microtopic_id):
     else:
         order_clause = f"p.{sort_by} {sort_order}"
 
-    # Get total count
+    # Get total count (use DISTINCT to avoid counting duplicates)
     total = db.execute("""
-        SELECT COUNT(*)
+        SELECT COUNT(DISTINCT p.id)
         FROM papers p
         INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
         WHERE pm.microtopic_id = ?
         AND (p.deleted = false OR p.deleted IS NULL)
     """, [microtopic_id]).fetchone()[0]
 
-    # Get paginated results
+    # Get paginated results (use subquery to ensure DISTINCT works with ORDER BY)
     result = db.execute(f"""
-        SELECT
+        SELECT DISTINCT
             p.id, p.title, p.citation_count, p.update_date, p.authors,
             pm.score, pm.is_primary
         FROM papers p
@@ -335,7 +335,7 @@ def get_topic_data(db, microtopic_id):
 
     # Get papers for stats
     papers = db.execute("""
-        SELECT p.*
+        SELECT DISTINCT p.*
         FROM papers p
         INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
         WHERE pm.microtopic_id = ?

@@ -124,7 +124,7 @@ def get_full_topic_data(db, microtopic_id):
 
     # Get papers for this topic
     papers = db.execute("""
-        SELECT p.*
+        SELECT DISTINCT p.*
         FROM papers p
         INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
         WHERE pm.microtopic_id = ?

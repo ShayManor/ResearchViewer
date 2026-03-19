@@ -40,29 +40,6 @@ export function RightSidebar({ userId, readingListIds, onRemoveFromList, onAddTo
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 pt-4 pb-3 border-b border-gray-100 shrink-0">
-        <button onClick={() => setVelOpen(!velOpen)} className="flex items-center justify-between w-full">
-          <div className="flex items-center gap-2"><TrendingUp size={13} className="text-gray-400" /><span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Velocity</span></div>
-          <div className="flex items-center gap-2">
-            {velocity ? (<><span className="text-xs font-bold text-gray-800 font-mono">{velocity.latest}/wk</span>
-              <span className={`text-[10px] font-mono font-medium ${velocity.delta >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{velocity.delta >= 0 ? '+' : ''}{Math.round(velocity.delta)}</span></>)
-              : <span className="text-xs text-gray-400">—</span>}
-            {velOpen ? <ChevronUp size={12} className="text-gray-400" /> : <ChevronDown size={12} className="text-gray-400" />}
-          </div>
-        </button>
-        {velOpen && vData.length > 0 && (
-          <div className="mt-3">
-            <div className="flex items-end gap-[2px] h-12">
-              {vData.map((v, i) => (<div key={i} className="flex-1" title={`${v.period_start}: ${v.count}`}>
-                <div className="w-full rounded-t" style={{ height: `${(v.count / maxV) * 100}%`, backgroundColor: i === vData.length - 1 ? '#3b82f6' : '#cbd5e1' }} /></div>))}
-            </div>
-            <div className="flex justify-between mt-1 text-[8px] text-gray-400 font-mono">
-              <span>{vData[0]?.period_start?.slice(5)}</span><span>{vData[vData.length - 1]?.period_start?.slice(5)}</span>
-            </div>
-          </div>
-        )}
-      </div>
-
       <div className="flex border-b border-gray-100 shrink-0">
         <TB active={tab === 'list'} onClick={() => setTab('list')} icon={<BookOpen size={12} />} label={`List (${readingListIds.size})`} />
         <TB active={tab === 'hot'} onClick={() => setTab('hot')} icon={<Flame size={12} />} label="Hot" />

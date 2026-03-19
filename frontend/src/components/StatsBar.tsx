@@ -15,17 +15,7 @@ export function StatsBar({ paperCount, drill, microNodeCount, microEdgeCount, to
 
       {drill.level === 'domain' && <S icon={<CircleDot size={11} />} label="Domains" value={String(domainCount)} />}
       {drill.level === 'topic' && <><S icon={<CircleDot size={11} />} label="Topics" value={String(topicCount)} /><span className="text-[9px] text-gray-400 truncate max-w-[120px]">{drill.domain}</span></>}
-      {drill.level === 'micro' && <><S icon={<CircleDot size={11} />} label="Microtopics" value={String(microNodeCount)} /><S icon={<Link2 size={11} />} label="Edges" value={String(microEdgeCount)} /><span className="text-[9px] text-gray-400 truncate max-w-[150px]">{drill.topic}</span></>}
-
-      <div className="h-3.5 w-px bg-gray-200" />
-
-      {velocity && (
-        <div className="flex items-center gap-1.5 text-gray-500">
-          <TrendingUp size={11} /><span className="text-gray-400">Vel</span>
-          <span className="font-bold text-gray-700 font-mono">{velocity.latest}/wk</span>
-          <span className={`font-mono font-medium ${velocity.delta >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>({velocity.delta >= 0 ? '+' : ''}{Math.round(velocity.delta)})</span>
-        </div>
-      )}
+      {drill.level === 'micro' && <><S icon={<CircleDot size={11} />} label="Microtopics" value={String(microNodeCount)} /><span className="text-[9px] text-gray-400 truncate max-w-[150px]">{drill.topic}</span></>}
 
       <div className="flex-1" />
 

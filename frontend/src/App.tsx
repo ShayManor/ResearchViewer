@@ -20,6 +20,7 @@ export default function App() {
   const [apiOnline, setApiOnline] = useState(false);
   const [paperCount, setPaperCount] = useState<number | null>(null);
   const [velocity, setVelocity] = useState<VelocityRes | null>(null);
+  const [username, setUsername] = useState<string>('');
 
   // Drill state
   const [drill, setDrill] = useState<DrillState>({ level: 'domain', domain: null, topic: null });
@@ -50,6 +51,7 @@ export default function App() {
     api.getDomains(100).then(d => setDomains(d.domains)).catch(() => {});
     api.velocity('week', 12).then(setVelocity).catch(() => {});
     api.getReadingList(USER_ID).then(d => setReadingListIds(new Set(d.papers.map(p => p.id)))).catch(() => {});
+    api.getUser(USER_ID).then(u => setUsername(u.username)).catch(() => {});
   }, []);
 
   // ── Drill handlers ─────────────────────────────────────────
@@ -111,7 +113,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      <Header onSearch={() => setSearchOpen(true)} onProfile={() => setProfileOpen(true)} apiOnline={apiOnline} readCount={readingListIds.size} />
+      <Header onSearch={() => setSearchOpen(true)} onProfile={() => setProfileOpen(true)} apiOnline={apiOnline} readCount={readingListIds.size} username={username} />
 
       <div className="flex flex-1 overflow-hidden">
         {selectedMicro && (
