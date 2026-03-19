@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from src.database import get_db, df_to_json_serializable
+from src.cache import cache
 import hashlib
 import secrets
 import datetime
@@ -589,6 +590,7 @@ def delete_publication(user_id, pub_id):
 
 
 @users_bp.route("/api/users/<int:user_id>/recommendations", methods=["GET"])
+@cache.cached(timeout=600, query_string=True)
 def get_recommendations(user_id):
     """Get recommended papers based on reading history and topics."""
     db = get_db()

@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from src.database import get_db, df_to_json_serializable
+from src.cache import cache
 
 analytics = Blueprint("analytics", __name__)
 
@@ -249,6 +250,7 @@ def submission_velocity():
 
 
 @analytics.route("/api/analytics/hot-papers", methods=["GET"])
+@cache.cached(timeout=300, query_string=True)
 def hot_papers():
     """Recently published papers with high citation growth."""
     db = get_db()

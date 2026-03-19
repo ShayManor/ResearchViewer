@@ -6,6 +6,7 @@ from flask import Flask
 from flask_cors import CORS
 
 from src.database import init_app as init_database, close_db
+from src.cache import cache
 from src.routes.analytics import analytics
 from src.routes.authors import authors_bp
 from src.routes.frontend import frontend
@@ -19,6 +20,12 @@ app = Flask(__name__, static_folder=None)
 
 # Initialize database connection
 init_database(app)
+
+# Initialize caching
+cache.init_app(app, config={
+    'CACHE_TYPE': 'SimpleCache',
+    'CACHE_DEFAULT_TIMEOUT': 300  # 5 minutes default
+})
 
 # Graceful shutdown for containers
 def shutdown_handler(signum, frame):
