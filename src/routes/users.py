@@ -215,20 +215,23 @@ def get_user(user_id):
         'days_since_join': days_since_join
     }
 
-    # Reading by topic
-    reading_by_topic = db.execute("""
+    # Reading by microtopic (organized by topic and domain)
+    reading_by_microtopic = db.execute("""
         SELECT
-            SPLIT_PART(p.categories, ' ', 1) as topic,
-            COUNT(*) as count
+            m.microtopic_id,
+            m.label as microtopic_label,
+            m.bucket_value as topic,
+            SPLIT_PART(m.bucket_value, '/', 1) as domain,
+            COUNT(DISTINCT urh.paper_id) as count
         FROM user_read_history urh
-        INNER JOIN papers p ON urh.paper_id = p.id
+        INNER JOIN paper_microtopics pm ON urh.paper_id = pm.paper_id
+        INNER JOIN microtopics m ON pm.microtopic_id = m.microtopic_id
         WHERE urh.user_id = ?
-        AND p.categories IS NOT NULL
-        GROUP BY topic
+        GROUP BY m.microtopic_id, m.label, m.bucket_value
         ORDER BY count DESC
     """, [user_id]).fetchdf()
 
-    user_data['reading_by_topic'] = df_to_json_serializable(reading_by_topic) if not reading_by_topic.empty else []
+    user_data['reading_by_microtopic'] = df_to_json_serializable(reading_by_microtopic) if not reading_by_microtopic.empty else []
 
     # Reading over time
     reading_over_time = db.execute("""

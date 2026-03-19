@@ -62,8 +62,8 @@ export const api = {
     req<{ subjects: SubjectEntry[] }>(`/api/analytics/subjects?limit=${limit}`),
   velocity: (period = 'week', lookback = 12, subject?: string) =>
     req<VelocityRes>(`/api/analytics/velocity${qs({ period, lookback, subject })}`),
-  hotPapers: (limit = 8) =>
-    req<{ papers: Paper[] }>(`/api/analytics/hot-papers?limit=${limit}`),
+  hotPapers: (limit = 8, userId?: number) =>
+    req<{ papers: Paper[] }>(`/api/analytics/hot-papers${qs({ limit, user_id: userId })}`),
 
   // Users
   getUser: (id: number) => req<UserProfile>(`/api/users/${id}`),
@@ -142,7 +142,7 @@ export interface UserProfile {
   user_id: number; username: string; email: string; focus_topics: string[];
   linked_author_id?: string; linked_author_name?: string; created_at: string;
   stats: { reading_list_count: number; papers_read_count: number; total_citations_covered: number; avg_citations_per_read: number; reading_pace_per_week: number; publication_count: number; publication_citations: number; days_since_join: number };
-  reading_by_topic: { topic: string; count: number }[];
+  reading_by_microtopic: { microtopic_id: string; microtopic_label: string; topic: string; domain: string; count: number }[];
   reading_over_time: { month: string; count: number }[];
 }
 export interface Publication { id: number; title: string; venue?: string; year: number; doi?: string; citation_count: number; coauthors: string[]; }

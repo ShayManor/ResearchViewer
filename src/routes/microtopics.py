@@ -352,6 +352,8 @@ def get_topic_data(db, microtopic_id):
         topic['stats'] = {
             'total_citations': int(papers['citation_count'].sum()),
             'avg_citations': float(papers['citation_count'].mean()),
+            'median_citations': float(papers['citation_count'].median()),
+            'max_citations': int(papers['citation_count'].max()),
             'paper_count': len(papers)
         }
 
@@ -364,7 +366,7 @@ def get_topic_data(db, microtopic_id):
         papers_by_year = papers.groupby('year').size().reset_index(name='count')
         topic['papers_by_year'] = df_to_json_serializable(papers_by_year)
     else:
-        topic['stats'] = {'total_citations': 0, 'avg_citations': 0, 'paper_count': 0}
+        topic['stats'] = {'total_citations': 0, 'avg_citations': 0, 'median_citations': 0, 'max_citations': 0, 'paper_count': 0}
         topic['top_papers'] = []
         topic['papers_by_year'] = []
 

@@ -312,21 +312,17 @@ export function GraphView({
         <button onClick={() => { setZoom(0.85); setPan({ x: 0, y: 0 }); }} className="p-2 rounded-lg bg-white/80 hover:bg-gray-100 text-gray-400 border border-gray-200/80 backdrop-blur-md"><RotateCcw size={16} /></button>
       </div>
 
-      {/* Level label */}
-      <div className="absolute bottom-4 left-4 p-3 rounded-xl bg-white/80 border border-gray-200/80 backdrop-blur-md z-10">
-        <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
-          {level === 'domain' ? 'Domains' : level === 'topic' ? 'Topics' : 'Microtopics'}
-        </p>
-        <p className="text-[10px] text-gray-500">
-          {level === 'domain' ? 'Click a domain to see its topics' : level === 'topic' ? 'Click a topic to see microtopics' : 'Click a microtopic for details'}
-        </p>
-        {level === 'micro' && (
-          <div className="flex items-center gap-3 mt-2 text-[9px] text-gray-500">
-            <div className="flex items-center gap-1"><svg width={16} height={3}><line x1={0} y1={1.5} x2={16} y2={1.5} stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="3 3" /></svg>Weak</div>
-            <div className="flex items-center gap-1"><svg width={16} height={5}><line x1={0} y1={2.5} x2={16} y2={2.5} stroke="#64748b" strokeWidth={4} /></svg>Strong</div>
-          </div>
-        )}
-      </div>
+      {/* Level label - only show for domain and topic levels */}
+      {level !== 'micro' && (
+        <div className="absolute bottom-4 left-4 p-3 rounded-xl bg-white/80 border border-gray-200/80 backdrop-blur-md z-10">
+          <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
+            {level === 'domain' ? 'Domains' : 'Topics'}
+          </p>
+          <p className="text-[10px] text-gray-500">
+            {level === 'domain' ? 'Click a domain to see its topics' : 'Click a topic to see microtopics'}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

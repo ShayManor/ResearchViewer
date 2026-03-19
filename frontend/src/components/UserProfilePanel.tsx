@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { X, BookOpen, TrendingUp, User, Link2, Unlink, Plus, FileText, BarChart3, Loader2 } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { X, BookOpen, TrendingUp, User, Link2, Unlink, Plus, FileText, BarChart3, Loader2, ChevronDown } from 'lucide-react';
 import { getCatColor, fmtCit } from '../lib/colors';
 import { api, type UserProfile, type Publication } from '../lib/api';
 
@@ -17,6 +17,7 @@ export function UserProfilePanel({ userId, onClose }: Props) {
   const [pubTitle, setPubTitle] = useState('');
   const [pubVenue, setPubVenue] = useState('');
   const [pubYear, setPubYear] = useState(new Date().getFullYear());
+  const [selectedDomain, setSelectedDomain] = useState<string>('all');
 
   useEffect(() => {
     setLoading(true);
@@ -24,6 +25,23 @@ export function UserProfilePanel({ userId, onClose }: Props) {
       .then(([u, p]) => { setProfile(u); setPubs(p.publications); setPubCites(p.total_citations); })
       .catch(() => {}).finally(() => setLoading(false));
   }, [userId]);
+
+  // Organize reading data by domain -> topic -> microtopics
+  const readingByDomainAndTopic = useMemo(() => {
+    if (!profile?.reading_by_microtopic) return { domains: [], byDomain: {} };
+
+    const byDomain: Record<string, Record<string, typeof profile.reading_by_microtopic>> = {};
+    const domains = new Set<string>();
+
+    profile.reading_by_microtopic.forEach((item) => {
+      domains.add(item.domain);
+      if (!byDomain[item.domain]) byDomain[item.domain] = {};
+      if (!byDomain[item.domain][item.topic]) byDomain[item.domain][item.topic] = [];
+      byDomain[item.domain][item.topic].push(item);
+    });
+
+    return { domains: Array.from(domains).sort(), byDomain };
+  }, [profile?.reading_by_microtopic]);
 
   const searchAuthor = async () => {
     if (!authorQ.trim()) return;
@@ -83,15 +101,70 @@ export function UserProfilePanel({ userId, onClose }: Props) {
 
           <div className="flex-1 overflow-y-auto p-6">
             {tab === 'reading' && (<div className="space-y-6">
-              {profile.reading_by_topic.length > 0 && (<div>
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Papers Read by Topic</p>
-                <div className="space-y-2">{profile.reading_by_topic.map(({ topic, count }) => {
-                  const cat = getCatColor(topic); const pct = st.papers_read_count > 0 ? (count / st.papers_read_count) * 100 : 0;
-                  return (<div key={topic} className="flex items-center gap-2">
-                    <span className="w-14 text-right text-[10px] font-medium shrink-0" style={{ color: cat.text }}>{topic}</span>
-                    <div className="flex-1 h-5 bg-gray-100 rounded overflow-hidden"><div className="h-full rounded" style={{ width: `${pct}%`, backgroundColor: cat.border }} /></div>
-                    <span className="w-8 text-right text-xs text-gray-600 font-mono">{count}</span></div>);
-                })}</div></div>)}
+              {profile.reading_by_microtopic && profile.reading_by_microtopic.length > 0 && (<div>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Papers Read by Topic</p>
+                  {readingByDomainAndTopic.domains.length > 1 && (
+                    <div className="relative">
+                      <select
+                        value={selectedDomain}
+                        onChange={(e) => setSelectedDomain(e.target.value)}
+                        className="text-xs px-2 py-1 pr-6 rounded-lg border border-gray-200 bg-white text-gray-700 font-medium appearance-none cursor-pointer hover:border-gray-300 focus:outline-none focus:border-gray-400"
+                      >
+                        <option value="all">All Domains</option>
+                        {readingByDomainAndTopic.domains.map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-4">
+                  {Object.entries(readingByDomainAndTopic.byDomain)
+                    .filter(([domain]) => selectedDomain === 'all' || selectedDomain === domain)
+                    .map(([domain, topics]) => (
+                      <div key={domain}>
+                        {selectedDomain === 'all' && (
+                          <p className="text-[9px] font-bold text-gray-500 uppercase tracking-wider mb-2">{domain}</p>
+                        )}
+                        {Object.entries(topics).map(([topic, microtopics]) => {
+                          const topicTotal = microtopics.reduce((sum, m) => sum + m.count, 0);
+                          const topicPct = st.papers_read_count > 0 ? (topicTotal / st.papers_read_count) * 100 : 0;
+                          const cat = getCatColor(topic);
+                          return (
+                            <div key={topic} className="mb-3">
+                              <div className="flex items-center gap-2 mb-1.5">
+                                <span className="text-[10px] font-semibold" style={{ color: cat.text }}>{topic.split('/').pop()}</span>
+                                <div className="flex-1 h-1.5 bg-gray-100 rounded overflow-hidden">
+                                  <div className="h-full rounded" style={{ width: `${topicPct}%`, backgroundColor: cat.border }} />
+                                </div>
+                                <span className="w-8 text-right text-[10px] text-gray-500 font-mono">{topicTotal}</span>
+                              </div>
+                              <div className="pl-3 space-y-1">
+                                {microtopics.slice(0, 5).map((m) => {
+                                  const microPct = topicTotal > 0 ? (m.count / topicTotal) * 100 : 0;
+                                  return (
+                                    <div key={m.microtopic_id} className="flex items-center gap-2">
+                                      <span className="text-[9px] text-gray-500 flex-1 truncate">{m.microtopic_label}</span>
+                                      <div className="w-20 h-1 bg-gray-50 rounded overflow-hidden">
+                                        <div className="h-full rounded" style={{ width: `${microPct}%`, backgroundColor: cat.border + '80' }} />
+                                      </div>
+                                      <span className="w-6 text-right text-[9px] text-gray-400 font-mono">{m.count}</span>
+                                    </div>
+                                  );
+                                })}
+                                {microtopics.length > 5 && (
+                                  <p className="text-[8px] text-gray-400 italic pl-2">+{microtopics.length - 5} more</p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                </div>
+              </div>)}
               {profile.reading_over_time.length > 0 && (<div>
                 <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Reading Over Time</p>
                 <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">

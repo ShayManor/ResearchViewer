@@ -26,8 +26,8 @@ export function RightSidebar({ userId, readingListIds, onRemoveFromList, onAddTo
   useEffect(() => {
     if (tab !== 'hot' || hotFetched) return;
     setHotLoading(true);
-    api.hotPapers(8).then(d => { setHotPapers(d.papers); setHotFetched(true); }).catch(() => {}).finally(() => setHotLoading(false));
-  }, [tab, hotFetched]);
+    api.hotPapers(8, userId).then(d => { setHotPapers(d.papers); setHotFetched(true); }).catch(() => {}).finally(() => setHotLoading(false));
+  }, [tab, hotFetched, userId]);
 
   useEffect(() => {
     if (tab !== 'recs') return;
@@ -101,7 +101,6 @@ function PC({ paper, onAction, actionIcon, highlight, reason, onMarkAsRead }: { 
       <p className="text-xs font-medium text-gray-700 leading-snug line-clamp-2">{paper.title}</p>
       <div className="flex items-center gap-1.5 mt-1">{paper.citation_count != null && <span className="text-[9px] text-gray-400">{fmtCit(paper.citation_count)}</span>}
         {paper.update_date && <span className="text-[9px] text-gray-400">{String(paper.update_date).slice(0, 4)}</span>}</div>
-      {reason && <p className="text-[9px] text-blue-500 mt-0.5 italic">{reason}</p>}
     </div>
     <div className="flex items-center gap-0.5 shrink-0">
       {arxiv && <a href={arxiv} target="_blank" rel="noopener noreferrer" className="p-1 rounded text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100"><ExternalLink size={10} /></a>}

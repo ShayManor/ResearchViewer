@@ -259,6 +259,7 @@ def hot_papers():
     since = request.args.get('since')
     sort_by = request.args.get('sort_by', 'citation_count')
     limit = int(request.args.get('limit', 10))
+    user_id = request.args.get('user_id')  # Optional: filter out user's read papers
 
     # Default to 2 years ago
     if not since:
@@ -279,6 +280,15 @@ def hot_papers():
         AND (deleted = false OR deleted IS NULL)
     """
     params = [since]
+
+    # Exclude papers the user has already read
+    if user_id:
+        query += """
+            AND id NOT IN (
+                SELECT paper_id FROM user_read_history WHERE user_id = ?
+            )
+        """
+        params.append(int(user_id))
 
     if subject:
         query += " AND categories LIKE ?"
