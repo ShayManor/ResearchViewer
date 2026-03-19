@@ -8,6 +8,32 @@ import datetime
 users_bp = Blueprint("users", __name__)
 
 
+def clear_user_recommendations_cache(user_id):
+    """Clear all cached recommendations for a specific user."""
+    # For SimpleCache with @cache.cached(), we need to clear the internal cache
+    # The simplest approach is to clear the entire cache or use a wildcard pattern
+
+    # Since SimpleCache doesn't support wildcards, we'll clear common variations
+    # and also use cache.clear() as a nuclear option for development
+
+    # In production, you might want to use Redis with key patterns instead
+    cache.clear()  # Clear all cache - simple but effective for development
+
+    # Alternatively, if cache.clear() is too aggressive, uncomment below:
+    # Common query parameter combinations
+    # query_variations = [
+    #     '', 'limit=10', 'limit=20',
+    #     'limit=10&strategy=hybrid', 'limit=10&strategy=citations',
+    #     'limit=10&strategy=topics', 'strategy=hybrid',
+    # ]
+    # for query in query_variations:
+    #     if query:
+    #         key = f'view//api/users/{user_id}/recommendations?{query}'
+    #     else:
+    #         key = f'view//api/users/{user_id}/recommendations'
+    #     cache.delete(key)
+
+
 def hash_password(password: str) -> str:
     """Hash password with embedded salt using SHA-256."""
     salt = secrets.token_hex(16)
@@ -377,6 +403,9 @@ def add_to_reading_list(user_id):
         [user_id, paper_id]
     )
 
+    # Clear recommendations cache since reading list changed
+    clear_user_recommendations_cache(user_id)
+
     return jsonify({"status": "added", "paper_id": paper_id}), 201
 
 
@@ -389,6 +418,9 @@ def remove_from_reading_list(user_id, paper_id):
         "DELETE FROM user_reading_list WHERE user_id = ? AND paper_id = ?",
         [user_id, paper_id]
     )
+
+    # Clear recommendations cache since reading list changed
+    clear_user_recommendations_cache(user_id)
 
     return jsonify({"status": "removed"})
 
@@ -469,6 +501,9 @@ def add_to_read_history(user_id):
         [user_id, paper_id, read_at]
     )
 
+    # Clear recommendations cache since read history changed
+    clear_user_recommendations_cache(user_id)
+
     return jsonify({"status": "added"}), 201
 
 
@@ -481,6 +516,9 @@ def remove_from_read_history(user_id, paper_id):
         "DELETE FROM user_read_history WHERE user_id = ? AND paper_id = ?",
         [user_id, paper_id]
     )
+
+    # Clear recommendations cache since read history changed
+    clear_user_recommendations_cache(user_id)
 
     return jsonify({"status": "removed"})
 
@@ -614,14 +652,12 @@ def get_recommendations(user_id):
 
     if strategy in ['citation_graph', 'hybrid']:
         # Papers that cite papers user has read
+        # Optimized: Use list_has_any instead of UNNEST for better performance
         citing_papers = db.execute(f"""
             SELECT DISTINCT p.id, p.title, p.citation_count, p.categories, p.update_date
             FROM papers p
             WHERE p.id NOT IN ({placeholders})
-            AND EXISTS (
-                SELECT 1 FROM unnest(p.citations) AS c(citation)
-                WHERE c.citation IN ({placeholders})
-            )
+            AND list_has_any(p.citations, CAST([{placeholders}] AS VARCHAR[]))
             AND (p.deleted = false OR p.deleted IS NULL)
             ORDER BY p.citation_count DESC
             LIMIT ?
@@ -640,20 +676,32 @@ def get_recommendations(user_id):
 
     if strategy in ['topic_similarity', 'hybrid'] and len(recommendations) < limit:
         # Papers sharing microtopics with read papers
-        similar_papers = db.execute(f"""
-            SELECT DISTINCT p.id, p.title, p.citation_count, p.categories, p.update_date
-            FROM papers p
-            INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
-            WHERE pm.microtopic_id IN (
-                SELECT DISTINCT microtopic_id
-                FROM paper_microtopics
-                WHERE paper_id IN ({placeholders})
-            )
-            AND p.id NOT IN ({placeholders})
-            AND (p.deleted = false OR p.deleted IS NULL)
-            ORDER BY p.citation_count DESC
-            LIMIT ?
-        """, read_paper_ids + read_paper_ids + [limit - len(recommendations)]).fetchdf()
+        # Optimized: Materialize microtopics first, then join
+        # Get microtopics from read papers
+        user_microtopics = db.execute(f"""
+            SELECT DISTINCT microtopic_id
+            FROM paper_microtopics
+            WHERE paper_id IN ({placeholders})
+        """, read_paper_ids).fetchdf()
+
+        if not user_microtopics.empty:
+            microtopic_ids = user_microtopics['microtopic_id'].tolist()
+            topic_placeholders = ','.join(['?'] * len(microtopic_ids))
+
+            similar_papers = db.execute(f"""
+                SELECT DISTINCT p.id, p.title, p.citation_count, p.categories, p.update_date
+                FROM papers p
+                INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
+                WHERE pm.microtopic_id IN ({topic_placeholders})
+                AND p.id NOT IN ({placeholders})
+                AND (p.deleted = false OR p.deleted IS NULL)
+                ORDER BY p.citation_count DESC
+                LIMIT ?
+            """, microtopic_ids + read_paper_ids + [limit - len(recommendations)]).fetchdf()
+        else:
+            # No microtopics found, return empty dataframe
+            import pandas as pd
+            similar_papers = pd.DataFrame(columns=['id', 'title', 'citation_count', 'categories', 'update_date'])
 
         for _, paper in similar_papers.iterrows():
             if paper['id'] not in [r['id'] for r in recommendations]:
