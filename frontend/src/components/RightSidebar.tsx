@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import { BookOpen, Flame, Lightbulb, X, ExternalLink, ChevronDown, ChevronUp, TrendingUp, Loader2 } from 'lucide-react';
+import { BookOpen, Flame, Lightbulb, X, ExternalLink, ChevronDown, ChevronUp, TrendingUp, Loader2, CheckCircle } from 'lucide-react';
 import { fmtCit } from '../lib/colors';
 import { api, type Paper, type Recommendation, type VelocityRes } from '../lib/api';
 
-interface Props { userId: number; readingListIds: Set<string>; onRemoveFromList: (id: string) => void; onAddToList: (id: string) => void; velocity: VelocityRes | null; }
+interface Props { userId: number; readingListIds: Set<string>; onRemoveFromList: (id: string) => void; onAddToList: (id: string) => void; velocity: VelocityRes | null; onMarkAsRead?: (id: string) => void; }
 type Tab = 'list' | 'hot' | 'recs';
 
-export function RightSidebar({ userId, readingListIds, onRemoveFromList, onAddToList, velocity }: Props) {
+export function RightSidebar({ userId, readingListIds, onRemoveFromList, onAddToList, velocity, onMarkAsRead }: Props) {
   const [tab, setTab] = useState<Tab>('list');
   const [velOpen, setVelOpen] = useState(false);
   const [listPapers, setListPapers] = useState<Paper[]>([]);
@@ -72,7 +72,7 @@ export function RightSidebar({ userId, readingListIds, onRemoveFromList, onAddTo
       <div className="flex-1 overflow-y-auto">
         {tab === 'list' && (<div className="p-3 space-y-1">
           {listLoading ? <CL /> : listPapers.length === 0 ? <Em text="Empty reading list" sub="Search for papers to add" /> :
-            listPapers.map(p => <PC key={p.id} paper={p} onAction={() => onRemoveFromList(p.id)} actionIcon={<X size={11} />} />)}
+            listPapers.map(p => <PC key={p.id} paper={p} onAction={() => onRemoveFromList(p.id)} actionIcon={<X size={11} />} onMarkAsRead={onMarkAsRead ? () => onMarkAsRead(p.id) : undefined} />)}
         </div>)}
         {tab === 'hot' && (<div className="p-3 space-y-1">
           {hotLoading ? <CL /> : hotPapers.length === 0 ? <Em text="No hot papers" sub="API may be offline" /> :
@@ -94,7 +94,7 @@ function TB({ active, onClick, icon, label }: { active: boolean; onClick: () => 
   return (<button onClick={onClick} className={`flex-1 flex items-center justify-center gap-1 py-2.5 text-[11px] font-medium relative ${active ? 'text-gray-800' : 'text-gray-400 hover:text-gray-500'}`}>
     {icon} {label}{active && <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-gray-800 rounded-full" />}</button>);
 }
-function PC({ paper, onAction, actionIcon, highlight, reason }: { paper: Paper; onAction: () => void; actionIcon: React.ReactNode; highlight?: boolean; reason?: string }) {
+function PC({ paper, onAction, actionIcon, highlight, reason, onMarkAsRead }: { paper: Paper; onAction: () => void; actionIcon: React.ReactNode; highlight?: boolean; reason?: string; onMarkAsRead?: () => void }) {
   const arxiv = paper.id?.match(/^\d{4}\./) ? `https://arxiv.org/abs/${paper.id}` : null;
   return (<div className={`group p-2.5 rounded-lg border ${highlight ? 'border-amber-200 bg-amber-50/30 hover:bg-amber-50/60' : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50/50'}`}>
     <div className="flex items-start gap-1.5"><div className="flex-1 min-w-0">
@@ -105,6 +105,7 @@ function PC({ paper, onAction, actionIcon, highlight, reason }: { paper: Paper; 
     </div>
     <div className="flex items-center gap-0.5 shrink-0">
       {arxiv && <a href={arxiv} target="_blank" rel="noopener noreferrer" className="p-1 rounded text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100"><ExternalLink size={10} /></a>}
+      {onMarkAsRead && <button onClick={onMarkAsRead} className="p-1 rounded text-gray-300 hover:text-emerald-500 opacity-0 group-hover:opacity-100" title="Mark as read"><CheckCircle size={10} /></button>}
       <button onClick={onAction} className="p-1 rounded text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100">{actionIcon}</button>
     </div></div></div>);
 }

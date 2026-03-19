@@ -77,6 +77,8 @@ export const api = {
     req<any>(`/api/users/${uid}/reading-list`, { method: 'POST', body: JSON.stringify({ paper_id: paperId }) }),
   removeFromReadingList: (uid: number, paperId: string) =>
     req<any>(`/api/users/${uid}/reading-list/${enc(paperId)}`, { method: 'DELETE' }),
+  markAsRead: (uid: number, paperId: string) =>
+    req<any>(`/api/users/${uid}/read-history`, { method: 'POST', body: JSON.stringify({ paper_id: paperId }) }),
   getPublications: (uid: number) =>
     req<{ publications: Publication[]; count: number; total_citations: number }>(`/api/users/${uid}/publications`),
   addPublication: (uid: number, data: any) =>

@@ -95,6 +95,12 @@ export default function App() {
     setReadingListIds(prev => { const n = new Set(prev); n.delete(id); return n; });
     api.removeFromReadingList(USER_ID, id).catch(() => setReadingListIds(prev => new Set(prev).add(id)));
   }, []);
+  const markAsRead = useCallback((id: string) => {
+    api.markAsRead(USER_ID, id).then(() => {
+      // Optionally remove from reading list after marking as read
+      removeFromList(id);
+    }).catch(err => console.error('Failed to mark as read:', err));
+  }, [removeFromList]);
 
   // ── Keyboard shortcut ──────────────────────────────────────
   useEffect(() => {
@@ -135,7 +141,7 @@ export default function App() {
         </div>
 
         <div className="w-[300px] shrink-0 border-l border-gray-200/80 overflow-hidden bg-white">
-          <RightSidebar userId={USER_ID} readingListIds={readingListIds} onRemoveFromList={removeFromList} onAddToList={addToList} velocity={velocity} />
+          <RightSidebar userId={USER_ID} readingListIds={readingListIds} onRemoveFromList={removeFromList} onAddToList={addToList} velocity={velocity} onMarkAsRead={markAsRead} />
         </div>
       </div>
 
