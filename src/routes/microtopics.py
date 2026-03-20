@@ -7,6 +7,7 @@ microtopics_bp = Blueprint("microtopics", __name__)
 
 
 @microtopics_bp.route("/api/microtopics", methods=["GET"])
+@cache.cached(timeout=300, query_string=True)
 def get_microtopics():
     """List microtopics with filtering."""
     db = get_db()
@@ -480,6 +481,7 @@ def get_topic_data(db, microtopic_id):
 
 
 @microtopics_bp.route("/api/microtopics/graph", methods=["GET"])
+@cache.cached(timeout=300, query_string=True)
 def microtopics_graph():
     """Returns a graph of microtopics as nodes and their relationships as edges."""
     db = get_db()
@@ -511,47 +513,69 @@ def microtopics_graph():
             "edge_count": 0
         })
 
+    topic_ids = topics['microtopic_id'].tolist()
+
+    # OPTIMIZED: Batch query for all paper stats at once instead of N+1 queries
+    placeholders = ','.join(['?'] * len(topic_ids))
+    all_stats = db.execute(f"""
+        SELECT
+            pm.microtopic_id,
+            COUNT(DISTINCT p.id) as paper_count,
+            COALESCE(AVG(p.citation_count), 0) as avg_citations,
+            COALESCE(SUM(p.citation_count), 0) as total_citations,
+            MAX(p.title) as top_paper_title
+        FROM paper_microtopics pm
+        INNER JOIN papers p ON p.id = pm.paper_id
+        WHERE pm.microtopic_id IN ({placeholders})
+        AND (p.deleted = false OR p.deleted IS NULL)
+        GROUP BY pm.microtopic_id
+    """, topic_ids).fetchdf()
+
+    # Create lookup dict for O(1) access
+    stats_lookup = {row['microtopic_id']: row for _, row in all_stats.iterrows()}
+
     # Build nodes
     nodes = []
     for _, topic in topics.iterrows():
-        # Get papers for this topic to calculate stats
-        papers = db.execute("""
-            SELECT p.citation_count, p.title
-            FROM papers p
-            INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
-            WHERE pm.microtopic_id = ?
-            AND (p.deleted = false OR p.deleted IS NULL)
-        """, [topic['microtopic_id']]).fetchdf()
+        topic_id = topic['microtopic_id']
+        stats = stats_lookup.get(topic_id)
 
         node = {
-            'id': topic['microtopic_id'],
+            'id': topic_id,
             'label': topic['label'],
             'bucket_value': topic['bucket_value'],
             'size': int(topic['size']),
-            'avg_citations': float(papers['citation_count'].mean()) if not papers.empty else 0,
-            'total_citations': int(papers['citation_count'].sum()) if not papers.empty else 0,
+            'avg_citations': float(stats['avg_citations']) if stats is not None else 0,
+            'total_citations': int(stats['total_citations']) if stats is not None else 0,
             'recent_growth_pct': 0,  # Simplified
-            'top_paper_title': papers.nlargest(1, 'citation_count')['title'].iloc[0] if not papers.empty else ''
+            'top_paper_title': stats['top_paper_title'] if stats is not None else ''
         }
         nodes.append(node)
 
-    # Build edges (compute overlap between topics)
-    edges = []
-    topic_ids = topics['microtopic_id'].tolist()
+    # OPTIMIZED: Batch query for all paper-topic relationships at once
+    all_paper_topics = db.execute(f"""
+        SELECT microtopic_id, paper_id
+        FROM paper_microtopics
+        WHERE microtopic_id IN ({placeholders})
+    """, topic_ids).fetchdf()
 
-    # Get paper sets for each topic
+    # Group by topic for O(1) lookup
     topic_papers = {}
-    for topic_id in topic_ids:
-        papers = db.execute("""
-            SELECT paper_id FROM paper_microtopics WHERE microtopic_id = ?
-        """, [topic_id]).fetchdf()
-        topic_papers[topic_id] = set(papers['paper_id'].tolist())
+    for _, row in all_paper_topics.iterrows():
+        topic_id = row['microtopic_id']
+        if topic_id not in topic_papers:
+            topic_papers[topic_id] = set()
+        topic_papers[topic_id].add(row['paper_id'])
 
     # Calculate edges
+    edges = []
     for i, topic_a in enumerate(topic_ids):
         for topic_b in topic_ids[i+1:]:
-            papers_a = topic_papers[topic_a]
-            papers_b = topic_papers[topic_b]
+            papers_a = topic_papers.get(topic_a, set())
+            papers_b = topic_papers.get(topic_b, set())
+
+            if not papers_a or not papers_b:
+                continue
 
             shared_papers = papers_a.intersection(papers_b)
             shared_count = len(shared_papers)
