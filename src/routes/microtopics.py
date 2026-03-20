@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from src.database import get_db, df_to_json_serializable
+from src.database import get_data_db as get_db, df_to_json_serializable
 from src.cache import cache
 import json
 

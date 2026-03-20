@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from src.database import get_db, df_to_json_serializable
+from src.database import get_user_db, get_data_db, df_to_json_serializable
 from src.cache import cache
 import hashlib
 import secrets
@@ -54,7 +54,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 @users_bp.route("/api/auth/register", methods=["POST"])
 def register():
     """Create account with username, email, password."""
-    db = get_db()
+    db = get_user_db()
     data = request.get_json()
 
     username = data.get('username')
@@ -99,7 +99,7 @@ def register():
 @users_bp.route("/api/auth/login", methods=["POST"])
 def login():
     """Authenticate user."""
-    db = get_db()
+    db = get_user_db()
     data = request.get_json()
 
     username = data.get('username')
@@ -136,10 +136,11 @@ def login():
 @users_bp.route("/api/users/<int:user_id>", methods=["GET"])
 def get_user(user_id):
     """Get user profile with all statistics."""
-    db = get_db()
+    user_db = get_user_db()
+    data_db = get_data_db()
 
-    # Get user info
-    user = db.execute(
+    # Get user info from user DB
+    user = user_db.execute(
         "SELECT id, username, email, focus_topics, linked_author_id, created_at FROM users WHERE id = ?",
         [user_id]
     ).fetchone()
@@ -156,45 +157,54 @@ def get_user(user_id):
         'created_at': user[5].isoformat() if user[5] else None
     }
 
-    # Get linked author name if exists
+    # Get linked author name from data DB
     if user[4]:
-        author = db.execute(
+        author = data_db.execute(
             "SELECT name FROM authors WHERE author_id = ?",
             [user[4]]
         ).fetchone()
         user_data['linked_author_name'] = author[0] if author else None
 
-    # Calculate statistics
-    reading_list_count = db.execute(
+    # Calculate statistics from user DB
+    reading_list_count = user_db.execute(
         "SELECT COUNT(*) FROM user_reading_list WHERE user_id = ?",
         [user_id]
     ).fetchone()[0]
 
-    papers_read_count = db.execute(
+    papers_read_count = user_db.execute(
         "SELECT COUNT(*) FROM user_read_history WHERE user_id = ?",
         [user_id]
     ).fetchone()[0]
 
-    publication_count = db.execute(
+    publication_count = user_db.execute(
         "SELECT COUNT(*) FROM user_publications WHERE user_id = ?",
         [user_id]
     ).fetchone()[0]
 
-    publication_citations = db.execute(
+    publication_citations = user_db.execute(
         "SELECT SUM(citation_count) FROM user_publications WHERE user_id = ?",
         [user_id]
     ).fetchone()[0] or 0
 
-    # Get total citations covered from read papers
-    read_papers = db.execute("""
-        SELECT p.citation_count
-        FROM user_read_history urh
-        INNER JOIN papers p ON urh.paper_id = p.id
-        WHERE urh.user_id = ?
-    """, [user_id]).fetchdf()
+    # Get paper IDs from read history, then query papers from data DB
+    read_paper_ids = user_db.execute(
+        "SELECT paper_id FROM user_read_history WHERE user_id = ?",
+        [user_id]
+    ).fetchdf()
 
-    total_citations_covered = int(read_papers['citation_count'].sum()) if not read_papers.empty else 0
-    avg_citations_per_read = int(read_papers['citation_count'].mean()) if not read_papers.empty else 0
+    total_citations_covered = 0
+    avg_citations_per_read = 0
+    if not read_paper_ids.empty:
+        paper_ids = read_paper_ids['paper_id'].tolist()
+        placeholders = ','.join(['?'] * len(paper_ids))
+        read_papers = data_db.execute(f"""
+            SELECT citation_count
+            FROM papers
+            WHERE id IN ({placeholders})
+        """, paper_ids).fetchdf()
+
+        total_citations_covered = int(read_papers['citation_count'].sum()) if not read_papers.empty else 0
+        avg_citations_per_read = int(read_papers['citation_count'].mean()) if not read_papers.empty else 0
 
     # Calculate reading pace (papers per week)
     if user[5]:
@@ -215,26 +225,29 @@ def get_user(user_id):
         'days_since_join': days_since_join
     }
 
-    # Reading by microtopic (organized by topic and domain)
-    reading_by_microtopic = db.execute("""
-        SELECT
-            m.microtopic_id,
-            m.label as microtopic_label,
-            m.bucket_value as topic,
-            SPLIT_PART(m.bucket_value, '/', 1) as domain,
-            COUNT(DISTINCT urh.paper_id) as count
-        FROM user_read_history urh
-        INNER JOIN paper_microtopics pm ON urh.paper_id = pm.paper_id
-        INNER JOIN microtopics m ON pm.microtopic_id = m.microtopic_id
-        WHERE urh.user_id = ?
-        GROUP BY m.microtopic_id, m.label, m.bucket_value
-        ORDER BY count DESC
-    """, [user_id]).fetchdf()
+    # Reading by microtopic - get paper IDs from user DB, then join with data DB
+    if not read_paper_ids.empty:
+        paper_ids = read_paper_ids['paper_id'].tolist()
+        placeholders = ','.join(['?'] * len(paper_ids))
+        reading_by_microtopic = data_db.execute(f"""
+            SELECT
+                m.microtopic_id,
+                m.label as microtopic_label,
+                m.bucket_value as topic,
+                SPLIT_PART(m.bucket_value, '/', 1) as domain,
+                COUNT(DISTINCT pm.paper_id) as count
+            FROM paper_microtopics pm
+            INNER JOIN microtopics m ON pm.microtopic_id = m.microtopic_id
+            WHERE pm.paper_id IN ({placeholders})
+            GROUP BY m.microtopic_id, m.label, m.bucket_value
+            ORDER BY count DESC
+        """, paper_ids).fetchdf()
+        user_data['reading_by_microtopic'] = df_to_json_serializable(reading_by_microtopic) if not reading_by_microtopic.empty else []
+    else:
+        user_data['reading_by_microtopic'] = []
 
-    user_data['reading_by_microtopic'] = df_to_json_serializable(reading_by_microtopic) if not reading_by_microtopic.empty else []
-
-    # Reading over time
-    reading_over_time = db.execute("""
+    # Reading over time from user DB
+    reading_over_time = user_db.execute("""
         SELECT
             strftime(read_at, '%Y-%m') as month,
             COUNT(*) as count
@@ -252,7 +265,7 @@ def get_user(user_id):
 @users_bp.route("/api/users/<int:user_id>", methods=["PUT"])
 def update_user(user_id):
     """Update profile fields."""
-    db = get_db()
+    db = get_user_db()
     data = request.get_json()
 
     # Check if user exists
@@ -288,7 +301,7 @@ def update_user(user_id):
 @users_bp.route("/api/users/<int:user_id>/link-author", methods=["PUT"])
 def link_author(user_id):
     """Link an author profile to user account."""
-    db = get_db()
+    db = get_user_db()
     data = request.get_json()
 
     author_id = data.get('author_id')
@@ -323,7 +336,7 @@ def link_author(user_id):
 @users_bp.route("/api/users/<int:user_id>/link-author", methods=["DELETE"])
 def unlink_author(user_id):
     """Unlink author profile from user account."""
-    db = get_db()
+    db = get_user_db()
 
     db.execute(
         "UPDATE users SET linked_author_id = NULL WHERE id = ?",
@@ -336,7 +349,8 @@ def unlink_author(user_id):
 @users_bp.route("/api/users/<int:user_id>/reading-list", methods=["GET"])
 def get_reading_list(user_id):
     """Get user's reading list."""
-    db = get_db()
+    user_db = get_user_db()
+    data_db = get_data_db()
 
     sort_by = request.args.get('sort_by', 'added_at')
     sort_order = request.args.get('sort_order', 'DESC')
@@ -349,21 +363,33 @@ def get_reading_list(user_id):
     if sort_order not in ['ASC', 'DESC']:
         sort_order = 'DESC'
 
-    # Get papers with sort
-    if sort_by == 'added_at':
-        order_clause = f"url.added_at {sort_order}"
-    else:
-        order_clause = f"p.{sort_by} {sort_order}"
-
-    result = db.execute(f"""
-        SELECT
-            p.id, p.title, p.citation_count, p.categories, p.update_date,
-            url.added_at
-        FROM user_reading_list url
-        INNER JOIN papers p ON url.paper_id = p.id
-        WHERE url.user_id = ?
-        ORDER BY {order_clause}
+    # Get reading list from user DB
+    reading_list = user_db.execute("""
+        SELECT paper_id, added_at
+        FROM user_reading_list
+        WHERE user_id = ?
     """, [user_id]).fetchdf()
+
+    if reading_list.empty:
+        return jsonify({"papers": [], "count": 0})
+
+    # Get paper details from data DB
+    paper_ids = reading_list['paper_id'].tolist()
+    placeholders = ','.join(['?'] * len(paper_ids))
+    papers = data_db.execute(f"""
+        SELECT id, title, citation_count, categories, update_date
+        FROM papers
+        WHERE id IN ({placeholders})
+    """, paper_ids).fetchdf()
+
+    # Merge reading list with paper details
+    result = reading_list.merge(papers, left_on='paper_id', right_on='id', how='left')
+
+    # Sort
+    if sort_by == 'added_at':
+        result = result.sort_values('added_at', ascending=(sort_order == 'ASC'))
+    else:
+        result = result.sort_values(sort_by, ascending=(sort_order == 'ASC'))
 
     return jsonify({
         "papers": df_to_json_serializable(result) if not result.empty else [],
@@ -374,7 +400,7 @@ def get_reading_list(user_id):
 @users_bp.route("/api/users/<int:user_id>/reading-list", methods=["POST"])
 def add_to_reading_list(user_id):
     """Add paper to reading list."""
-    db = get_db()
+    db = get_user_db()
     data = request.get_json()
 
     paper_id = data.get('paper_id')
@@ -415,7 +441,7 @@ def add_to_reading_list(user_id):
 @users_bp.route("/api/users/<int:user_id>/reading-list/<path:paper_id>", methods=["DELETE"])
 def remove_from_reading_list(user_id, paper_id):
     """Remove paper from reading list."""
-    db = get_db()
+    db = get_user_db()
 
     db.execute(
         "DELETE FROM user_reading_list WHERE user_id = ? AND paper_id = ?",
@@ -431,7 +457,8 @@ def remove_from_reading_list(user_id, paper_id):
 @users_bp.route("/api/users/<int:user_id>/read-history", methods=["GET"])
 def get_read_history(user_id):
     """Get user's read history."""
-    db = get_db()
+    user_db = get_user_db()
+    data_db = get_data_db()
 
     sort_by = request.args.get('sort_by', 'read_at')
     sort_order = request.args.get('sort_order', 'DESC')
@@ -446,28 +473,39 @@ def get_read_history(user_id):
     if sort_order not in ['ASC', 'DESC']:
         sort_order = 'DESC'
 
-    # Get total count
-    total = db.execute(
+    # Get total count from user DB
+    total = user_db.execute(
         "SELECT COUNT(*) FROM user_read_history WHERE user_id = ?",
         [user_id]
     ).fetchone()[0]
 
-    # Get papers with pagination
-    if sort_by == 'read_at':
-        order_clause = f"urh.read_at {sort_order}"
-    else:
-        order_clause = f"p.{sort_by} {sort_order}"
-
-    result = db.execute(f"""
-        SELECT
-            p.id, p.title, p.citation_count, p.categories,
-            urh.read_at
-        FROM user_read_history urh
-        INNER JOIN papers p ON urh.paper_id = p.id
-        WHERE urh.user_id = ?
-        ORDER BY {order_clause}
+    # Get read history from user DB with pagination
+    read_history = user_db.execute(f"""
+        SELECT paper_id, read_at
+        FROM user_read_history
+        WHERE user_id = ?
+        ORDER BY read_at {sort_order}
         LIMIT ? OFFSET ?
     """, [user_id, per_page, (page - 1) * per_page]).fetchdf()
+
+    if read_history.empty:
+        result = read_history
+    else:
+        # Get paper details from data DB
+        paper_ids = read_history['paper_id'].tolist()
+        placeholders = ','.join(['?'] * len(paper_ids))
+        papers = data_db.execute(f"""
+            SELECT id, title, citation_count, categories
+            FROM papers
+            WHERE id IN ({placeholders})
+        """, paper_ids).fetchdf()
+
+        # Merge
+        result = read_history.merge(papers, left_on='paper_id', right_on='id', how='left')
+
+        # Re-sort if needed
+        if sort_by == 'citation_count':
+            result = result.sort_values('citation_count', ascending=(sort_order == 'ASC'))
 
     return jsonify({
         "history": df_to_json_serializable(result) if not result.empty else [],
@@ -480,7 +518,7 @@ def get_read_history(user_id):
 @users_bp.route("/api/users/<int:user_id>/read-history", methods=["POST"])
 def add_to_read_history(user_id):
     """Mark a paper as read."""
-    db = get_db()
+    db = get_user_db()
     data = request.get_json()
 
     paper_id = data.get('paper_id')
@@ -513,7 +551,7 @@ def add_to_read_history(user_id):
 @users_bp.route("/api/users/<int:user_id>/read-history/<path:paper_id>", methods=["DELETE"])
 def remove_from_read_history(user_id, paper_id):
     """Un-mark a paper as read."""
-    db = get_db()
+    db = get_user_db()
 
     db.execute(
         "DELETE FROM user_read_history WHERE user_id = ? AND paper_id = ?",
@@ -529,9 +567,9 @@ def remove_from_read_history(user_id, paper_id):
 @users_bp.route("/api/users/<int:user_id>/publications", methods=["GET"])
 def get_publications(user_id):
     """Get user's publications."""
-    db = get_db()
+    user_db = get_user_db()
 
-    result = db.execute("""
+    result = user_db.execute("""
         SELECT id, title, venue, year, doi, citation_count, coauthors
         FROM user_publications
         WHERE user_id = ?
@@ -555,7 +593,7 @@ def get_publications(user_id):
 @users_bp.route("/api/users/<int:user_id>/publications", methods=["POST"])
 def add_publication(user_id):
     """Add a publication."""
-    db = get_db()
+    db = get_user_db()
     data = request.get_json()
 
     title = data.get('title')
@@ -584,7 +622,7 @@ def add_publication(user_id):
 @users_bp.route("/api/users/<int:user_id>/publications/<int:pub_id>", methods=["PUT"])
 def update_publication(user_id, pub_id):
     """Update a publication entry."""
-    db = get_db()
+    db = get_user_db()
     data = request.get_json()
 
     # Check if publication exists and belongs to user
@@ -620,7 +658,7 @@ def update_publication(user_id, pub_id):
 @users_bp.route("/api/users/<int:user_id>/publications/<int:pub_id>", methods=["DELETE"])
 def delete_publication(user_id, pub_id):
     """Delete a publication."""
-    db = get_db()
+    db = get_user_db()
 
     db.execute(
         "DELETE FROM user_publications WHERE id = ? AND user_id = ?",
@@ -634,13 +672,14 @@ def delete_publication(user_id, pub_id):
 @cache.cached(timeout=600, query_string=True)
 def get_recommendations(user_id):
     """Get recommended papers based on reading history and topics."""
-    db = get_db()
+    user_db = get_user_db()
+    data_db = get_data_db()
 
     limit = int(request.args.get('limit', 10))
     strategy = request.args.get('strategy', 'hybrid')
 
-    # Get user's read papers
-    read_papers = db.execute(
+    # Get user's read papers from user DB
+    read_papers = user_db.execute(
         "SELECT paper_id FROM user_read_history WHERE user_id = ?",
         [user_id]
     ).fetchdf()
@@ -654,9 +693,9 @@ def get_recommendations(user_id):
     recommendations = []
 
     if strategy in ['citation_graph', 'hybrid']:
-        # Papers that cite papers user has read
+        # Papers that cite papers user has read (query data DB)
         # Optimized: Use list_has_any instead of UNNEST for better performance
-        citing_papers = db.execute(f"""
+        citing_papers = data_db.execute(f"""
             SELECT DISTINCT p.id, p.title, p.citation_count, p.categories, p.update_date
             FROM papers p
             WHERE p.id NOT IN ({placeholders})
@@ -678,10 +717,10 @@ def get_recommendations(user_id):
             })
 
     if strategy in ['topic_similarity', 'hybrid'] and len(recommendations) < limit:
-        # Papers sharing microtopics with read papers
+        # Papers sharing microtopics with read papers (query data DB)
         # Optimized: Materialize microtopics first, then join
         # Get microtopics from read papers
-        user_microtopics = db.execute(f"""
+        user_microtopics = data_db.execute(f"""
             SELECT DISTINCT microtopic_id
             FROM paper_microtopics
             WHERE paper_id IN ({placeholders})
@@ -691,7 +730,7 @@ def get_recommendations(user_id):
             microtopic_ids = user_microtopics['microtopic_id'].tolist()
             topic_placeholders = ','.join(['?'] * len(microtopic_ids))
 
-            similar_papers = db.execute(f"""
+            similar_papers = data_db.execute(f"""
                 SELECT DISTINCT p.id, p.title, p.citation_count, p.categories, p.update_date
                 FROM papers p
                 INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
