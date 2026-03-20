@@ -37,6 +37,7 @@ export default function App() {
 
   // Selected microtopic for detail panel
   const [selectedMicro, setSelectedMicro] = useState<string | null>(null);
+  const [isComparing, setIsComparing] = useState(false);
 
   // Reading list
   const [readingListIds, setReadingListIds] = useState<Set<string>>(new Set());
@@ -117,9 +118,10 @@ export default function App() {
 
       <div className="flex flex-1 overflow-hidden">
         {selectedMicro && (
-          <div className="w-[420px] shrink-0 border-r border-gray-200/80 overflow-hidden bg-white animate-slide-in">
+          <div className={`${isComparing ? 'w-[680px]' : 'w-[480px]'} shrink-0 border-r border-gray-200/80 overflow-x-hidden bg-white transition-all duration-300`}>
             <MicrotopicPanel microtopicId={selectedMicro} allNodes={microNodes} onClose={() => setSelectedMicro(null)}
-              readingListIds={readingListIds} onAddToList={addToList} onRemoveFromList={removeFromList} userId={USER_ID} />
+              readingListIds={readingListIds} onAddToList={addToList} onRemoveFromList={removeFromList} userId={USER_ID}
+              onCompareModeChange={setIsComparing} />
           </div>
         )}
 
@@ -149,7 +151,7 @@ export default function App() {
 
       <StatsBar paperCount={paperCount} drill={drill} microNodeCount={microNodes.length} microEdgeCount={microEdges.length} topicCount={topics.length} domainCount={domains.length} velocity={velocity} apiOnline={apiOnline} />
 
-      {searchOpen && <SearchDialog onClose={() => setSearchOpen(false)} onAddToList={addToList} readingListIds={readingListIds} />}
+      {searchOpen && <SearchDialog onClose={() => setSearchOpen(false)} onAddToList={addToList} onMarkAsRead={markAsRead} readingListIds={readingListIds} />}
       {profileOpen && <UserProfilePanel userId={USER_ID} onClose={() => setProfileOpen(false)} />}
     </div>
   );

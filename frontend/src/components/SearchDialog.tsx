@@ -1,12 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, X, FileText, User, Loader2, SlidersHorizontal, Plus, Check } from 'lucide-react';
-import { api, type Paper, type Author } from '../lib/api';
+import { Search, X, FileText, User, Loader2, SlidersHorizontal, Plus, Check, ExternalLink, CheckCircle, BookOpen } from 'lucide-react';
+import { api, type Paper, type Author, type DomainEntry, type TopicEntry, type Microtopic } from '../lib/api';
 import { getCatColor, fmtCit } from '../lib/colors';
 
-interface Props { onClose: () => void; onAddToList: (id: string) => void; readingListIds: Set<string>; }
+interface Props {
+  onClose: () => void;
+  onAddToList: (id: string) => void;
+  onMarkAsRead: (id: string) => void;
+  readingListIds: Set<string>;
+}
 type Tab = 'papers' | 'authors';
 
-export function SearchDialog({ onClose, onAddToList, readingListIds }: Props) {
+export function SearchDialog({ onClose, onAddToList, onMarkAsRead, readingListIds }: Props) {
   const [tab, setTab] = useState<Tab>('papers');
   const [query, setQuery] = useState('');
   const [papers, setPapers] = useState<Paper[]>([]);
@@ -14,27 +19,61 @@ export function SearchDialog({ onClose, onAddToList, readingListIds }: Props) {
   const [authors, setAuthors] = useState<Author[]>([]);
   const [loading, setLoading] = useState(false);
   const [showF, setShowF] = useState(false);
-  const [fSubject, setFSubject] = useState('');
+
+  // Cascading filters: domain → topic → microtopic
+  const [domains, setDomains] = useState<DomainEntry[]>([]);
+  const [fDomain, setFDomain] = useState('');
+  const [topics, setTopics] = useState<TopicEntry[]>([]);
+  const [fTopic, setFTopic] = useState('');
+  const [microtopics, setMicrotopics] = useState<Microtopic[]>([]);
+  const [fMicrotopic, setFMicrotopic] = useState('');
+
+  // Other filters
   const [fAuthor, setFAuthor] = useState('');
   const [fStart, setFStart] = useState('');
   const [fEnd, setFEnd] = useState('');
   const [fMinCit, setFMinCit] = useState('');
   const [fSort, setFSort] = useState('citation_count');
   const [fOrder, setFOrder] = useState('DESC');
+
   const inputRef = useRef<HTMLInputElement>(null);
   const debRef = useRef<ReturnType<typeof setTimeout>>();
 
+  // Load domains on mount
   useEffect(() => {
-    inputRef.current?.focus();
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
+    api.getDomains(100).then(d => setDomains(d.domains)).catch(() => {});
+  }, []);
+
+  // Load topics when domain changes
+  useEffect(() => {
+    if (!fDomain) {
+      setTopics([]);
+      setFTopic('');
+      setMicrotopics([]);
+      setFMicrotopic('');
+      return;
+    }
+    api.getTopicsInDomain(fDomain, 100).then(d => setTopics(d.topics)).catch(() => setTopics([]));
+    setFTopic('');
+    setMicrotopics([]);
+    setFMicrotopic('');
+  }, [fDomain]);
+
+  // Load microtopics when topic changes
+  useEffect(() => {
+    if (!fTopic) {
+      setMicrotopics([]);
+      setFMicrotopic('');
+      return;
+    }
+    api.getMicrotopics({ bucket_value: fTopic, limit: 100 }).then(d => setMicrotopics(d.microtopics)).catch(() => setMicrotopics([]));
+    setFMicrotopic('');
+  }, [fTopic]);
 
   const doSearch = useCallback(() => {
     const q = query.trim();
-    // Need at least a query or a filter to search
-    if (!q && !fSubject && !fAuthor && !fMinCit) {
+    // Search if there's a query OR any filter
+    if (!q && !fDomain && !fTopic && !fMicrotopic && !fAuthor && !fMinCit && !fStart && !fEnd) {
       setPapers([]); setPTotal(0); setAuthors([]);
       return;
     }
@@ -43,7 +82,9 @@ export function SearchDialog({ onClose, onAddToList, readingListIds }: Props) {
     if (tab === 'papers') {
       const params: Record<string, string> = { per_page: '25', sort_by: fSort, sort_order: fOrder };
       if (q) params.keyword = q;
-      if (fSubject) params.subject = fSubject;
+      if (fDomain) params.domain = fDomain;
+      if (fTopic) params.topic = fTopic;
+      if (fMicrotopic) params.microtopic_id = fMicrotopic;
       if (fAuthor) params.author = fAuthor;
       if (fStart) params.start_date = fStart;
       if (fEnd) params.end_date = fEnd;
@@ -60,17 +101,37 @@ export function SearchDialog({ onClose, onAddToList, readingListIds }: Props) {
         .catch(() => setAuthors([]))
         .finally(() => setLoading(false));
     }
-  }, [tab, query, fSubject, fAuthor, fStart, fEnd, fMinCit, fSort, fOrder]);
+  }, [tab, query, fDomain, fTopic, fMicrotopic, fAuthor, fStart, fEnd, fMinCit, fSort, fOrder]);
 
-  // Debounced search on any input change
+  // Focus input and handle keyboard shortcuts
+  useEffect(() => {
+    inputRef.current?.focus();
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+      // Trigger search immediately on Enter key
+      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        clearTimeout(debRef.current);
+        doSearch();
+      }
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose, doSearch]);
+
+  // Debounced search on any input change (longer delay to avoid slow searches on every keystroke)
   useEffect(() => {
     clearTimeout(debRef.current);
-    debRef.current = setTimeout(doSearch, 400);
+    debRef.current = setTimeout(doSearch, 800);
     return () => clearTimeout(debRef.current);
   }, [doSearch]);
 
-  const hasF = !!(fSubject || fAuthor || fStart || fEnd || fMinCit);
-  const clearF = () => { setFSubject(''); setFAuthor(''); setFStart(''); setFEnd(''); setFMinCit(''); };
+  const hasF = !!(fDomain || fTopic || fMicrotopic || fAuthor || fStart || fEnd || fMinCit);
+  const clearF = () => {
+    setFDomain(''); setFTopic(''); setFMicrotopic('');
+    setFAuthor(''); setFStart(''); setFEnd(''); setFMinCit('');
+    setTopics([]); setMicrotopics([]);
+  };
   const noInput = !query.trim() && !hasF;
 
   return (
@@ -83,7 +144,7 @@ export function SearchDialog({ onClose, onAddToList, readingListIds }: Props) {
           <div className="flex items-center gap-3 px-5 border-b border-gray-100">
             <Search size={18} className="text-gray-400 shrink-0" />
             <input ref={inputRef} type="text" value={query} onChange={e => setQuery(e.target.value)}
-              placeholder={tab === 'papers' ? 'Search papers by title, author, DOI…' : 'Search authors by name…'}
+              placeholder={tab === 'papers' ? 'Search papers by title, author, abstract…' : 'Search authors by name…'}
               className="flex-1 py-4 text-sm text-gray-800 placeholder:text-gray-300 focus:outline-none bg-transparent" />
             {loading && <Loader2 size={16} className="text-gray-400 animate-spin" />}
             {tab === 'papers' && (
@@ -114,14 +175,68 @@ export function SearchDialog({ onClose, onAddToList, readingListIds }: Props) {
                 <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Filters</span>
                 {hasF && <button onClick={clearF} className="text-[10px] text-blue-500">Clear</button>}
               </div>
+
+              {/* Cascading Dropdowns: Domain → Topic → Microtopic */}
               <div className="grid grid-cols-3 gap-2">
-                <FIn label="Subject" value={fSubject} onChange={setFSubject} placeholder="cs.LG" />
+                {/* Domain */}
+                <div>
+                  <label className="block text-[10px] text-gray-500 mb-0.5">Domain</label>
+                  <select value={fDomain} onChange={e => setFDomain(e.target.value)}
+                    className="w-full px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white focus:outline-none">
+                    <option value="">All domains</option>
+                    {domains.map(d => (
+                      <option key={d.domain} value={d.domain}>{d.domain}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Topic */}
+                <div>
+                  <label className="block text-[10px] text-gray-500 mb-0.5">Topic</label>
+                  {!fDomain ? (
+                    <select disabled className="w-full px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-gray-100 text-gray-400">
+                      <option>Select domain first</option>
+                    </select>
+                  ) : (
+                    <select value={fTopic} onChange={e => setFTopic(e.target.value)}
+                      className="w-full px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white focus:outline-none">
+                      <option value="">All topics</option>
+                      {topics.map(t => (
+                        <option key={t.topic} value={t.topic}>{t.topic}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {/* Microtopic */}
+                <div>
+                  <label className="block text-[10px] text-gray-500 mb-0.5">Microtopic</label>
+                  {!fTopic ? (
+                    <select disabled className="w-full px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-gray-100 text-gray-400">
+                      <option>Select topic first</option>
+                    </select>
+                  ) : (
+                    <select value={fMicrotopic} onChange={e => setFMicrotopic(e.target.value)}
+                      className="w-full px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white focus:outline-none">
+                      <option value="">All microtopics</option>
+                      {microtopics.map(m => (
+                        <option key={m.microtopic_id} value={m.microtopic_id}>{m.label}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              {/* Other Filters */}
+              <div className="grid grid-cols-4 gap-2">
                 <FIn label="Author" value={fAuthor} onChange={setFAuthor} placeholder="Vaswani" />
                 <FIn label="Min Citations" value={fMinCit} onChange={setFMinCit} placeholder="1000" />
-              </div>
-              <div className="grid grid-cols-4 gap-2">
                 <FIn label="From" value={fStart} onChange={setFStart} type="date" />
                 <FIn label="To" value={fEnd} onChange={setFEnd} type="date" />
+              </div>
+
+              {/* Sort Options */}
+              <div className="grid grid-cols-2 gap-2">
                 <div><label className="block text-[10px] text-gray-500 mb-0.5">Sort</label>
                   <select value={fSort} onChange={e => setFSort(e.target.value)} className="w-full px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white focus:outline-none">
                     <option value="citation_count">Citations</option><option value="update_date">Date</option><option value="title">Title</option>
@@ -140,14 +255,16 @@ export function SearchDialog({ onClose, onAddToList, readingListIds }: Props) {
           <div className="max-h-[45vh] overflow-y-auto">
             {tab === 'papers' && (
               <>
-                {noInput && <div className="px-5 py-8 text-center"><p className="text-sm text-gray-400">Type a query or add filters to search</p></div>}
+                {noInput && !loading && <div className="px-5 py-8 text-center"><p className="text-sm text-gray-400">Type a query or add filters to search</p><p className="text-xs text-gray-300 mt-1">Press Enter to search immediately</p></div>}
                 {!noInput && !papers.length && !loading && <div className="px-5 py-8 text-center"><p className="text-sm text-gray-400">No papers found</p></div>}
                 {papers.map(p => {
                   const c = getCatColor(p.categories?.split(' ')[0] || '');
                   const inList = readingListIds.has(p.id);
+                  const arxiv = p.id?.match(/^\d{4}\./) ? `https://arxiv.org/abs/${p.id}` : null;
+
                   return (
-                    <div key={p.id} className="flex items-center px-5 py-3 hover:bg-gray-50 border-b border-gray-50 group">
-                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <div key={p.id} className="px-5 py-3 hover:bg-gray-50 border-b border-gray-50 group">
+                      <div className="flex items-start gap-3">
                         <div className="w-7 h-7 rounded-lg shrink-0 flex items-center justify-center mt-0.5" style={{ backgroundColor: c.fill, border: `1px solid ${c.border}30` }}>
                           <FileText size={13} style={{ color: c.text }} />
                         </div>
@@ -156,16 +273,60 @@ export function SearchDialog({ onClose, onAddToList, readingListIds }: Props) {
                           <div className="flex items-center gap-2 mt-1 flex-wrap">
                             <span className="text-[10px] text-gray-400 font-mono">{p.id}</span>
                             {p.citation_count != null && <span className="text-[10px] text-gray-400">{fmtCit(p.citation_count)} cites</span>}
-                            {p.categories && <span className="text-[10px] px-1.5 rounded-full" style={{ color: c.text, backgroundColor: c.fill }}>{p.categories.split(' ')[0]}</span>}
+                            {p.primary_topic_name && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200">
+                                {p.primary_topic_name}
+                              </span>
+                            )}
                             {p.update_date && <span className="text-[10px] text-gray-400">{String(p.update_date).slice(0, 4)}</span>}
                           </div>
                           {p.authors && <p className="text-[10px] text-gray-400 mt-0.5 truncate">{p.authors}</p>}
+
+                          {/* Action buttons */}
+                          <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!inList) onAddToList(p.id);
+                              }}
+                              className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                                inList
+                                  ? 'bg-blue-100 text-blue-600 cursor-default'
+                                  : 'bg-gray-100 text-gray-600 hover:bg-blue-100 hover:text-blue-600'
+                              }`}
+                              title="Add to reading list"
+                            >
+                              {inList ? <Check size={10} /> : <BookOpen size={10} />}
+                              <span>{inList ? 'In list' : 'Add to list'}</span>
+                            </button>
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onMarkAsRead(p.id);
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-gray-100 text-gray-600 hover:bg-emerald-100 hover:text-emerald-600 transition-colors"
+                              title="Mark as read"
+                            >
+                              <CheckCircle size={10} />
+                              <span>Mark read</span>
+                            </button>
+
+                            {arxiv && (
+                              <a
+                                href={arxiv}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                                title="Open on arXiv"
+                              >
+                                <ExternalLink size={10} />
+                                <span>arXiv</span>
+                              </a>
+                            )}
+                          </div>
                         </div>
                       </div>
-                      <button onClick={() => { if (!inList) onAddToList(p.id); }}
-                        className={`p-2 rounded-lg shrink-0 ml-2 transition-all ${inList ? 'text-blue-500 bg-blue-50' : 'text-gray-300 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover:opacity-100'}`}>
-                        {inList ? <Check size={14} /> : <Plus size={14} />}
-                      </button>
                     </div>
                   );
                 })}

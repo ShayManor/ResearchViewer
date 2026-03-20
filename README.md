@@ -81,11 +81,9 @@ created_at,TIMESTAMP,YES,,CURRENT_TIMESTAMP,
 
 
 TODO:
-1) Fix frontend render issues
-2) Add 3 levels of graph
-3) Fix the many many bugs in the frontend
-4) Put API + Database onto GCE/Runpod that serves frontend 
-5) HTTPS + Networking + Redis
+1) Fix the many many bugs in the frontend
+2) Put API + Database onto GCE/Runpod that serves frontend 
+3) HTTPS + Networking + Redis
 ## Features
 
 ### Paper Analyzer

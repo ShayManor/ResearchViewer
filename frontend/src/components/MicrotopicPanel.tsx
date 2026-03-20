@@ -6,9 +6,10 @@ import { api, type MicrotopicDetail, type Paper, type CompareRes, type GraphNode
 interface Props {
   microtopicId: string; allNodes: GraphNode[]; onClose: () => void;
   readingListIds: Set<string>; onAddToList: (id: string) => void; onRemoveFromList: (id: string) => void; userId: number;
+  onCompareModeChange?: (isComparing: boolean) => void;
 }
 
-export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListIds, onAddToList, onRemoveFromList }: Props) {
+export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListIds, onAddToList, onRemoveFromList, onCompareModeChange }: Props) {
   const [detail, setDetail] = useState<MicrotopicDetail | null>(null);
   const [papers, setPapers] = useState<Paper[]>([]);
   const [paperTotal, setPaperTotal] = useState(0);
@@ -22,12 +23,13 @@ export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListId
 
   useEffect(() => {
     setLoading(true); setDetail(null); setPapers([]); setTab('papers'); setCompareData(null); setPapersPage(1);
+    onCompareModeChange?.(false); // Reset compare mode when switching microtopics
     Promise.all([
       api.getMicrotopic(microtopicId),
       api.getMicrotopicPapers(microtopicId, { page: 1, per_page: 20, sort_by: 'citation_count' }),
     ]).then(([d, p]) => { setDetail(d); setPapers(p.papers); setPaperTotal(p.total); })
       .catch(() => {}).finally(() => setLoading(false));
-  }, [microtopicId]);
+  }, [microtopicId, onCompareModeChange]);
 
   const loadMore = () => {
     const next = papersPage + 1;
@@ -38,10 +40,21 @@ export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListId
   const runCompare = () => {
     if (!compareId) return;
     setReportLoading(true);
-    api.compareMicrotopics(microtopicId, compareId).then(setCompareData).catch(() => setCompareData(null)).finally(() => setReportLoading(false));
+    api.compareMicrotopics(microtopicId, compareId).then(data => {
+      setCompareData(data);
+      onCompareModeChange?.(true);
+    }).catch(() => {
+      setCompareData(null);
+      onCompareModeChange?.(false);
+    }).finally(() => setReportLoading(false));
   };
 
-  useEffect(() => { if (compareId) setCompareData(null); }, [compareId]);
+  useEffect(() => {
+    if (compareId) {
+      setCompareData(null);
+      onCompareModeChange?.(false);
+    }
+  }, [compareId, onCompareModeChange]);
 
   const exportPDF = () => {
     if (!reportRef.current) return;
@@ -68,10 +81,10 @@ export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListId
       <div className="px-5 pt-5 pb-3 border-b border-gray-100 shrink-0">
         <div className="flex items-start justify-between gap-2 mb-2">
           <div className="flex-1 min-w-0">
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold mb-1.5" style={{ backgroundColor: cat.fill, color: cat.text, border: `1px solid ${cat.border}40` }}>{detail.bucket_value}</span>
-            <h2 className="text-base font-semibold text-gray-800 leading-snug">{detail.label}</h2>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold mb-1.5 max-w-full truncate" style={{ backgroundColor: cat.fill, color: cat.text, border: `1px solid ${cat.border}40` }}>{detail.bucket_value}</span>
+            <h2 className="text-base font-semibold text-gray-800 leading-snug break-words">{detail.label}</h2>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><X size={16} /></button>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 shrink-0"><X size={16} /></button>
         </div>
         <div className="grid grid-cols-4 gap-1.5">
           <MM icon={<BookOpen size={9} />} label="Papers" value={String(st.paper_count)} />
@@ -144,21 +157,21 @@ export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListId
             {reportLoading && <div className="py-8 flex justify-center"><Loader2 size={20} className="animate-spin text-gray-400" /></div>}
             {!reportLoading && (
               <div ref={reportRef} className="space-y-4">
-                <div>
-                  <h1 style={{ fontFamily: "'Instrument Serif', serif", fontSize: '18px', color: '#1f2937' }}>{detail.label}</h1>
-                  <p className="text-[10px] text-gray-400 mt-0.5">{detail.bucket_value} · {st.paper_count} papers · {new Date().toLocaleDateString()}</p>
+                <div className="overflow-hidden">
+                  <h1 className="break-words" style={{ fontFamily: "'Instrument Serif', serif", fontSize: '18px', color: '#1f2937' }}>{detail.label}</h1>
+                  <p className="text-[10px] text-gray-400 mt-0.5 truncate">{detail.bucket_value} · {st.paper_count} papers · {new Date().toLocaleDateString()}</p>
                 </div>
                 {compareData ? (
                   <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold" style={{ backgroundColor: cat.fill, color: cat.text }}>{detail.label}</span>
-                      <ArrowLeftRight size={11} className="text-gray-400" />
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-600">{compareData.topic_b.label}</span>
+                    <div className="flex items-center gap-2 mb-2 overflow-hidden">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold truncate max-w-[45%]" style={{ backgroundColor: cat.fill, color: cat.text }}>{detail.label}</span>
+                      <ArrowLeftRight size={11} className="text-gray-400 shrink-0" />
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-600 truncate max-w-[45%]">{compareData.topic_b.label}</span>
                     </div>
-                    <table className="w-full text-xs"><thead><tr>
-                      <th className="text-left py-1 px-2 text-[8px] text-gray-400 uppercase border-b-2 border-gray-200">Metric</th>
-                      <th className="text-right py-1 px-2 text-[8px] uppercase border-b-2 border-gray-200" style={{ color: cat.text }}>{detail.label}</th>
-                      <th className="text-right py-1 px-2 text-[8px] text-gray-500 uppercase border-b-2 border-gray-200">{compareData.topic_b.label}</th>
+                    <table className="w-full text-xs table-fixed"><thead><tr>
+                      <th className="text-left py-1 px-2 text-[8px] text-gray-400 uppercase border-b-2 border-gray-200 w-[30%]">Metric</th>
+                      <th className="text-right py-1 px-2 text-[8px] uppercase border-b-2 border-gray-200 truncate w-[35%]" style={{ color: cat.text }}>{detail.label}</th>
+                      <th className="text-right py-1 px-2 text-[8px] text-gray-500 uppercase border-b-2 border-gray-200 truncate w-[35%]">{compareData.topic_b.label}</th>
                     </tr></thead><tbody>
                       <CR label="Papers" a={st.paper_count} b={compareData.topic_b.stats.paper_count} />
                       <CR label="Total Cites" a={st.total_citations} b={compareData.topic_b.stats.total_citations} />
@@ -167,7 +180,11 @@ export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListId
                       <CR label="Max" a={st.max_citations} b={compareData.topic_b.stats.max_citations} />
                     </tbody></table>
                     <div className="mt-3 p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-700">
-                      {compareData.overlap.shared_paper_count} shared papers · {compareData.overlap.cross_citation_count} cross-cites · Jaccard {(compareData.overlap.jaccard_similarity * 100).toFixed(1)}%
+                      <div className="flex items-center gap-4">
+                        <div><span className="font-semibold">{compareData.overlap.shared_author_count}</span> shared authors</div>
+                        <div><span className="font-semibold">{Math.abs(st.paper_count - compareData.topic_b.stats.paper_count)}</span> paper diff</div>
+                        <div><span className="font-semibold">{Math.abs(st.avg_citations - compareData.topic_b.stats.avg_citations).toFixed(1)}</span> avg cite diff</div>
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -182,22 +199,28 @@ export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListId
                     <RC label="Authors" value={st.unique_author_count != null ? fmtCit(st.unique_author_count) : '—'} />
                   </div>
                 )}
-                {detail.papers_by_year.length > 0 && (<div>
+                {detail.papers_by_year.length > 0 && (<div className="overflow-visible">
                   <p className="text-[9px] font-semibold text-gray-400 uppercase mb-1.5">Citations by Year</p>
-                  <SvgBar data={detail.papers_by_year.map(d => ({ label: d.year.toString().slice(-2), value: d.total_citations }))} color={cat.border} height={80} />
+                  <div className="overflow-visible">
+                    <SvgBar data={detail.papers_by_year.map(d => ({ label: d.year.toString().slice(-2), value: d.total_citations }))} color={cat.border} height={80} />
+                  </div>
                 </div>)}
-                {detail.papers_by_year.length > 0 && (<div>
+                {detail.papers_by_year.length > 0 && (<div className="overflow-visible">
                   <p className="text-[9px] font-semibold text-gray-400 uppercase mb-1.5">Papers per Year</p>
-                  <SvgBar data={detail.papers_by_year.map(d => ({ label: d.year.toString().slice(-2), value: d.count }))} color="#64748b" height={50} />
+                  <div className="overflow-visible">
+                    <SvgBar data={detail.papers_by_year.map(d => ({ label: d.year.toString().slice(-2), value: d.count }))} color="#64748b" height={50} />
+                  </div>
                 </div>)}
                 {detail.citation_distribution.length > 0 && (<div>
-                  <p className="text-[9px] font-semibold text-gray-400 uppercase mb-1.5">Citation Distribution</p>
-                  <div className="space-y-1">{detail.citation_distribution.map(d => {
-                    const max = Math.max(...detail.citation_distribution.map(x => x.count), 1);
-                    return (<div key={d.bucket} className="flex items-center gap-2">
-                      <span className="w-16 text-right text-[9px] text-gray-500 font-mono shrink-0">{d.bucket}</span>
+                  <p className="text-[9px] font-semibold text-gray-400 uppercase mb-1.5">Citation Distribution <span className="text-gray-300 normal-case font-normal">(# of papers by citation count)</span></p>
+                  <div className="space-y-1">{detail.citation_distribution.map((d: any) => {
+                    const max = Math.max(...detail.citation_distribution.map((x: any) => x.count), 1);
+                    const pct = ((d.count / st.paper_count) * 100).toFixed(0);
+                    const bucket = d.citation_bucket || d.bucket;
+                    return (<div key={bucket} className="flex items-center gap-2">
+                      <span className="w-16 text-right text-[9px] text-gray-500 font-mono shrink-0" title="Citation range">{bucket}</span>
                       <div className="flex-1 h-3.5 bg-gray-100 rounded overflow-hidden"><div className="h-full rounded" style={{ width: `${(d.count / max) * 100}%`, backgroundColor: cat.border + 'cc' }} /></div>
-                      <span className="w-8 text-[9px] text-gray-400 font-mono">{d.count}</span>
+                      <span className="w-12 text-[9px] text-gray-400 font-mono" title={`${d.count} papers (${pct}%)`}>{d.count} ({pct}%)</span>
                     </div>);
                   })}</div>
                 </div>)}
@@ -247,10 +270,29 @@ function SvgBar({ data, color, height = 80 }: { data: { label: string; value: nu
   if (!data.length) return null;
   const max = Math.max(...data.map(d => d.value), 1);
   const bw = Math.max(8, Math.min(22, (340 - data.length * 2) / data.length));
-  return (<div className="overflow-x-auto"><svg width={data.length * (bw + 3)} height={height + 18}>
+  const leftPadding = 42; // More space for Y-axis labels
+  const totalWidth = data.length * (bw + 3) + leftPadding + 5;
+
+  // Y-axis ticks (5 levels)
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map(pct => ({
+    y: height - (pct * height),
+    label: Math.round(pct * max).toLocaleString()
+  }));
+
+  return (<div className="overflow-visible -ml-2"><svg width={totalWidth} height={height + 18} className="overflow-visible">
+    {/* Y-axis */}
+    <line x1={leftPadding - 5} y1={0} x2={leftPadding - 5} y2={height} stroke="#e5e7eb" strokeWidth={1} />
+    {yTicks.map((tick, i) => (
+      <g key={i}>
+        <line x1={leftPadding - 8} y1={tick.y} x2={leftPadding - 5} y2={tick.y} stroke="#9ca3af" strokeWidth={1} />
+        <text x={leftPadding - 10} y={tick.y + 3} textAnchor="end" fontSize={7} fill="#9ca3af">{tick.label}</text>
+      </g>
+    ))}
+
+    {/* Bars */}
     {data.map((d, i) => { const h2 = (d.value / max) * height; return (<g key={i}>
-      <rect x={i * (bw + 3)} y={height - h2} width={bw} height={Math.max(h2, 1)} rx={2} fill={color} opacity={0.8} />
+      <rect x={leftPadding + i * (bw + 3)} y={height - h2} width={bw} height={Math.max(h2, 1)} rx={2} fill={color} opacity={0.8} />
       <title>{d.label}: {d.value.toLocaleString()}</title>
-      <text x={i * (bw + 3) + bw / 2} y={height + 12} textAnchor="middle" fontSize={7} fill="#9ca3af">{d.label}</text></g>); })}
+      <text x={leftPadding + i * (bw + 3) + bw / 2} y={height + 12} textAnchor="middle" fontSize={7} fill="#9ca3af">{d.label}</text></g>); })}
   </svg></div>);
 }

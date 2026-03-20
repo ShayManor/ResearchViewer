@@ -52,6 +52,8 @@ export const api = {
 
   // Microtopic detail
   getMicrotopic: (id: string) => req<MicrotopicDetail>(`/api/microtopics/${enc(id)}`),
+  getMicrotopics: (p: { bucket_value?: string; search?: string; limit?: number } = {}) =>
+    req<{ microtopics: Microtopic[]; count: number }>(`/api/microtopics${qs(p as any)}`),
   getMicrotopicPapers: (id: string, p: { page?: number; per_page?: number; sort_by?: string } = {}) =>
     req<{ papers: Paper[]; total: number }>(`/api/microtopics/${enc(id)}/papers${qs(p as any)}`),
   compareMicrotopics: (a: string, b: string) =>
@@ -95,13 +97,14 @@ export interface Paper {
   id: string; title: string; authors?: string; abstract?: string; categories?: string;
   citation_count?: number; update_date?: string; doi?: string; 'journal-ref'?: string;
   score?: number; is_primary?: boolean; added_at?: string; read_at?: string;
+  primary_topic_name?: string; primary_domain_name?: string;
 }
 export interface PaperDetail extends Paper {
   citations?: string[]; author_ids?: string[]; primary_topic_name?: string;
   primary_field_name?: string; microtopics?: { microtopic_id: string; label: string; score: number; is_primary: boolean }[];
 }
 export interface PaperQuery {
-  keyword?: string; subject?: string; author?: string; microtopic_id?: string;
+  keyword?: string; subject?: string; author?: string; domain?: string; topic?: string; microtopic_id?: string;
   start_date?: string; end_date?: string; min_citations?: string; max_citations?: string;
   sort_by?: string; sort_order?: string; page?: number; per_page?: number;
 }

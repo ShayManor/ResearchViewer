@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from src.database import get_db, df_to_json_serializable
+from src.cache import cache
 import json
 
 microtopics_bp = Blueprint("microtopics", __name__)
@@ -67,6 +68,7 @@ def get_microtopics():
 
 
 @microtopics_bp.route("/api/microtopics/<microtopic_id>", methods=["GET"])
+@cache.cached(timeout=300, query_string=True)
 def get_microtopic_detail(microtopic_id):
     """Full detail for a single microtopic including aggregated statistics."""
     db = get_db()
@@ -92,40 +94,70 @@ def get_microtopic_detail(microtopic_id):
         'representative_titles': json.loads(result[7]) if result[7] else []
     }
 
-    # Get papers in this microtopic for stats
-    papers = db.execute("""
-        SELECT DISTINCT p.*
+    # Calculate statistics using SQL aggregations (much faster than Python)
+    import datetime
+    current_year = datetime.datetime.now().year
+
+    stats = db.execute("""
+        SELECT
+            COUNT(DISTINCT p.id) as paper_count,
+            COALESCE(SUM(p.citation_count), 0) as total_citations,
+            COALESCE(AVG(p.citation_count), 0) as avg_citations,
+            COALESCE(MEDIAN(p.citation_count), 0) as median_citations,
+            COALESCE(MAX(p.citation_count), 0) as max_citations,
+            MIN(CAST(strftime(p.update_date, '%Y') AS INTEGER)) as min_year,
+            MAX(CAST(strftime(p.update_date, '%Y') AS INTEGER)) as max_year,
+            SUM(CASE WHEN CAST(strftime(p.update_date, '%Y') AS INTEGER) >= ? THEN 1 ELSE 0 END) as recent_count
         FROM papers p
         INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
         WHERE pm.microtopic_id = ?
         AND (p.deleted = false OR p.deleted IS NULL)
-    """, [microtopic_id]).fetchdf()
+    """, [current_year - 2, microtopic_id]).fetchone()
 
-    if not papers.empty:
-        # Calculate statistics
-        total_citations = int(papers['citation_count'].sum())
-        avg_citations = float(papers['citation_count'].mean())
-        median_citations = float(papers['citation_count'].median())
-        max_citations = int(papers['citation_count'].max())
+    paper_count = int(stats[0])
 
-        # Year range
-        papers['year'] = papers['update_date'].astype(str).str[:4]
-        year_range = f"{papers['year'].min()}-{papers['year'].max()}"
+    if paper_count > 0:
+        total_citations = int(stats[1])
+        avg_citations = float(stats[2])
+        median_citations = float(stats[3])
+        max_citations = int(stats[4])
+        min_year = stats[5]
+        max_year = stats[6]
+        recent_count = stats[7]
+        year_range = f"{min_year}-{max_year}"
+        recent_growth_pct = (recent_count / paper_count) * 100
 
-        # Recent growth (papers in last 2 years / total)
-        import datetime
-        current_year = datetime.datetime.now().year
-        recent_papers = papers[papers['year'].astype(int) >= current_year - 2]
-        recent_growth_pct = (len(recent_papers) / len(papers)) * 100 if len(papers) > 0 else 0
+        # Get paper data for author parsing and grouping (only needed fields)
+        papers = db.execute("""
+            SELECT DISTINCT p.id, p.citation_count, p.authors, strftime(p.update_date, '%Y') as year
+            FROM papers p
+            INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
+            WHERE pm.microtopic_id = ?
+            AND (p.deleted = false OR p.deleted IS NULL)
+        """, [microtopic_id]).fetchdf()
+
+        # Calculate unique authors (single pass)
+        unique_authors = set()
+        author_counts = {}
+        for authors_str in papers['authors'].dropna():
+            if authors_str:
+                for author in str(authors_str).split(',')[:3]:
+                    author = author.strip()
+                    if author:
+                        unique_authors.add(author)
+                        if author not in author_counts:
+                            author_counts[author] = {'count': 0, 'citations': 0}
+                        author_counts[author]['count'] += 1
 
         microtopic['stats'] = {
             'total_citations': total_citations,
             'avg_citations': avg_citations,
             'median_citations': median_citations,
             'max_citations': max_citations,
-            'paper_count': len(papers),
+            'paper_count': paper_count,
             'year_range': year_range,
-            'recent_growth_pct': round(recent_growth_pct, 1)
+            'recent_growth_pct': round(recent_growth_pct, 1),
+            'unique_author_count': len(unique_authors)
         }
 
         # Papers by year
@@ -155,31 +187,27 @@ def get_microtopic_detail(microtopic_id):
         citation_dist = papers.groupby('citation_bucket').size().reset_index(name='count')
         microtopic['citation_distribution'] = df_to_json_serializable(citation_dist)
 
-        # Top authors (parse authors field and count)
-        # This is simplified - in production would parse authors_parsed properly
-        author_counts = {}
-        for authors_str in papers['authors'].dropna():
-            if authors_str:
-                # Simple split by comma
-                for author in str(authors_str).split(',')[:3]:  # First 3 authors
-                    author = author.strip()
-                    if author:
-                        if author not in author_counts:
-                            author_counts[author] = {'count': 0, 'citations': 0}
-                        author_counts[author]['count'] += 1
-
+        # Top authors (already calculated above)
         top_authors = sorted(
-            [{'name': name, 'paper_count': stats['count'], 'total_citations': stats['citations']}
-             for name, stats in author_counts.items()],
+            [{'name': name, 'paper_count': stats_dict['count'], 'total_citations': stats_dict['citations']}
+             for name, stats_dict in author_counts.items()],
             key=lambda x: x['paper_count'],
             reverse=True
         )[:10]
 
         microtopic['top_authors'] = top_authors
 
-        # Top papers
-        top_papers = papers.nlargest(10, 'citation_count')[['id', 'title', 'citation_count', 'update_date', 'authors']]
-        microtopic['top_papers'] = df_to_json_serializable(top_papers)
+        # Top papers (fetch directly from database)
+        top_papers_result = db.execute("""
+            SELECT DISTINCT p.id, p.title, p.citation_count, p.update_date, p.authors
+            FROM papers p
+            INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
+            WHERE pm.microtopic_id = ?
+            AND (p.deleted = false OR p.deleted IS NULL)
+            ORDER BY p.citation_count DESC
+            LIMIT 10
+        """, [microtopic_id]).fetchdf()
+        microtopic['top_papers'] = df_to_json_serializable(top_papers_result)
     else:
         microtopic['stats'] = {
             'total_citations': 0,
@@ -199,6 +227,7 @@ def get_microtopic_detail(microtopic_id):
 
 
 @microtopics_bp.route("/api/microtopics/<microtopic_id>/papers", methods=["GET"])
+@cache.cached(timeout=300, query_string=True)
 def get_microtopic_papers(microtopic_id):
     """Papers belonging to a microtopic, paginated."""
     db = get_db()
@@ -303,15 +332,69 @@ def compare_microtopics():
     else:
         shared_papers_list = []
 
-    # Cross citations (papers in A that cite papers in B and vice versa)
-    cross_citations = 0
-    # This is expensive - simplified implementation
-    # In production, would optimize with better indexing
+    # Calculate shared authors with improved parsing
+    def parse_authors(authors_str):
+        """Parse author string handling 'and' separator."""
+        authors = set()
+        if not authors_str:
+            return authors
+
+        # Replace ' and ' with ',' for consistent parsing
+        authors_str = str(authors_str).replace(' and ', ', ')
+
+        # Split by comma and clean up
+        for author in authors_str.split(','):
+            author = author.strip()
+            # Remove common prefixes/suffixes
+            author = author.replace('et al.', '').replace('et al', '').strip()
+            if author and len(author) > 2:  # Ignore single letters/initials
+                # Normalize to last name only for better matching
+                # Take the last word which is typically the surname
+                parts = author.split()
+                if parts:
+                    surname = parts[-1]
+                    # Only add if it looks like a real name (not a number, not too short)
+                    if surname.isalpha() and len(surname) > 2:
+                        authors.add(surname.lower())
+        return authors
+
+    authors_a = set()
+    authors_b = set()
+
+    # Get authors from topic A (limit to 1000 papers for performance)
+    authors_a_result = db.execute("""
+        SELECT DISTINCT p.authors
+        FROM papers p
+        INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
+        WHERE pm.microtopic_id = ?
+        AND p.authors IS NOT NULL
+        AND (p.deleted = false OR p.deleted IS NULL)
+        LIMIT 1000
+    """, [topic_a_id]).fetchdf()
+
+    for authors_str in authors_a_result['authors'].dropna():
+        authors_a.update(parse_authors(authors_str))
+
+    # Get authors from topic B (limit to 1000 papers for performance)
+    authors_b_result = db.execute("""
+        SELECT DISTINCT p.authors
+        FROM papers p
+        INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
+        WHERE pm.microtopic_id = ?
+        AND p.authors IS NOT NULL
+        AND (p.deleted = false OR p.deleted IS NULL)
+        LIMIT 1000
+    """, [topic_b_id]).fetchdf()
+
+    for authors_str in authors_b_result['authors'].dropna():
+        authors_b.update(parse_authors(authors_str))
+
+    shared_author_count = len(authors_a.intersection(authors_b))
 
     overlap = {
         'shared_paper_count': shared_paper_count,
-        'shared_author_count': 0,  # Would need to compute author overlap
-        'cross_citation_count': cross_citations,
+        'shared_author_count': shared_author_count,
+        'cross_citation_count': 0,  # Kept at 0 as it's expensive to calculate
         'jaccard_similarity': round(jaccard_similarity, 3),
         'shared_papers': shared_papers_list
     }
@@ -333,14 +416,19 @@ def get_topic_data(db, microtopic_id):
     if not result:
         return None
 
-    # Get papers for stats
-    papers = db.execute("""
-        SELECT DISTINCT p.*
+    # Get stats using SQL aggregations (optimized)
+    stats = db.execute("""
+        SELECT
+            COUNT(DISTINCT p.id) as paper_count,
+            COALESCE(SUM(p.citation_count), 0) as total_citations,
+            COALESCE(AVG(p.citation_count), 0) as avg_citations,
+            COALESCE(MEDIAN(p.citation_count), 0) as median_citations,
+            COALESCE(MAX(p.citation_count), 0) as max_citations
         FROM papers p
         INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
         WHERE pm.microtopic_id = ?
         AND (p.deleted = false OR p.deleted IS NULL)
-    """, [microtopic_id]).fetchdf()
+    """, [microtopic_id]).fetchone()
 
     topic = {
         'microtopic_id': result[0],
@@ -348,22 +436,40 @@ def get_topic_data(db, microtopic_id):
         'size': result[5]
     }
 
-    if not papers.empty:
+    paper_count = int(stats[0])
+    if paper_count > 0:
         topic['stats'] = {
-            'total_citations': int(papers['citation_count'].sum()),
-            'avg_citations': float(papers['citation_count'].mean()),
-            'median_citations': float(papers['citation_count'].median()),
-            'max_citations': int(papers['citation_count'].max()),
-            'paper_count': len(papers)
+            'total_citations': int(stats[1]),
+            'avg_citations': float(stats[2]),
+            'median_citations': float(stats[3]),
+            'max_citations': int(stats[4]),
+            'paper_count': paper_count
         }
 
-        # Top papers
-        top_papers = papers.nlargest(5, 'citation_count')[['id', 'title', 'citation_count']]
-        topic['top_papers'] = df_to_json_serializable(top_papers)
+        # Top papers (optimized query)
+        top_papers_result = db.execute("""
+            SELECT DISTINCT p.id, p.title, p.citation_count
+            FROM papers p
+            INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
+            WHERE pm.microtopic_id = ?
+            AND (p.deleted = false OR p.deleted IS NULL)
+            ORDER BY p.citation_count DESC
+            LIMIT 5
+        """, [microtopic_id]).fetchdf()
+        topic['top_papers'] = df_to_json_serializable(top_papers_result)
 
-        # Papers by year
-        papers['year'] = papers['update_date'].astype(str).str[:4]
-        papers_by_year = papers.groupby('year').size().reset_index(name='count')
+        # Papers by year (optimized query)
+        papers_by_year = db.execute("""
+            SELECT
+                strftime(p.update_date, '%Y') as year,
+                COUNT(*) as count
+            FROM papers p
+            INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
+            WHERE pm.microtopic_id = ?
+            AND (p.deleted = false OR p.deleted IS NULL)
+            GROUP BY year
+            ORDER BY year
+        """, [microtopic_id]).fetchdf()
         topic['papers_by_year'] = df_to_json_serializable(papers_by_year)
     else:
         topic['stats'] = {'total_citations': 0, 'avg_citations': 0, 'median_citations': 0, 'max_citations': 0, 'paper_count': 0}

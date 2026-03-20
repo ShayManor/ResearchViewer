@@ -63,6 +63,9 @@ def df_to_json_serializable(df: pd.DataFrame) -> list[dict[str, Any]]:
             return float(val)
         elif isinstance(val, (np.bool_, bool)):
             return bool(val)
+        elif isinstance(val, (pd.Timestamp, np.datetime64)):
+            # Convert datetime to ISO format string (YYYY-MM-DD)
+            return pd.Timestamp(val).strftime('%Y-%m-%d')
         elif isinstance(val, dict):
             return {k: convert_value(v) for k, v in val.items()}
         else:

@@ -13,6 +13,8 @@ def get_papers():
     keyword = request.args.get('keyword')
     subject = request.args.get('subject')
     author = request.args.get('author')
+    domain = request.args.get('domain')
+    topic = request.args.get('topic')
     microtopic_id = request.args.get('microtopic_id')
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
@@ -48,8 +50,8 @@ def get_papers():
         """
         params = [microtopic_id]
     else:
-        base_query = "SELECT * FROM papers WHERE deleted = false OR deleted IS NULL"
-        count_query = "SELECT COUNT(*) FROM papers WHERE deleted = false OR deleted IS NULL"
+        base_query = "SELECT * FROM papers WHERE (deleted = false OR deleted IS NULL)"
+        count_query = "SELECT COUNT(*) FROM papers WHERE (deleted = false OR deleted IS NULL)"
         params = []
 
     # Add filters
@@ -70,6 +72,18 @@ def get_papers():
         base_query += filter_clause
         count_query += filter_clause
         params.append(f"%{author}%")
+
+    if domain:
+        filter_clause = " AND primary_domain_name = ?"
+        base_query += filter_clause
+        count_query += filter_clause
+        params.append(domain)
+
+    if topic:
+        filter_clause = " AND primary_topic_name = ?"
+        base_query += filter_clause
+        count_query += filter_clause
+        params.append(topic)
 
     if start_date:
         filter_clause = " AND update_date >= ?"
