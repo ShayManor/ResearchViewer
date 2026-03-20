@@ -57,16 +57,169 @@ export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListId
   }, [compareId, onCompareModeChange]);
 
   const exportPDF = () => {
-    if (!reportRef.current) return;
+    if (!detail) return;
+    const cat = getCatColor(detail.bucket_value);
+    const st = detail.stats;
+
+    // Generate stats HTML
+    const statsHtml = `
+      <div class="stat-box"><div class="stat-label">Papers</div><div class="stat-value">${st.paper_count}</div></div>
+      <div class="stat-box"><div class="stat-label">Total Cites</div><div class="stat-value">${fmtCit(st.total_citations)}</div></div>
+      <div class="stat-box"><div class="stat-label">Avg Cites</div><div class="stat-value">${st.avg_citations?.toFixed(1) || '—'}</div></div>
+      <div class="stat-box"><div class="stat-label">Median</div><div class="stat-value">${fmtCit(st.median_citations)}</div></div>
+      <div class="stat-box"><div class="stat-label">Max Cites</div><div class="stat-value">${fmtCit(st.max_citations)}</div></div>
+      <div class="stat-box"><div class="stat-label">Growth</div><div class="stat-value">${Math.round(st.recent_growth_pct)}%</div></div>
+      <div class="stat-box"><div class="stat-label">Span</div><div class="stat-value">${st.year_range || '—'}</div></div>
+      <div class="stat-box"><div class="stat-label">Authors</div><div class="stat-value">${st.unique_author_count != null ? fmtCit(st.unique_author_count) : '—'}</div></div>
+    `;
+
+    // Generate top papers HTML
+    const topPapersHtml = detail.top_papers.length > 0 ? `
+      <h2>Top Papers by Citations</h2>
+      <table>
+        <thead><tr><th style="width: 30px">#</th><th>Title</th><th style="text-align: right; width: 80px">Citations</th><th style="text-align: center; width: 60px">Year</th></tr></thead>
+        <tbody>
+          ${detail.top_papers.slice(0, 10).map((p, i) => `
+            <tr>
+              <td style="color: #9ca3af">${i + 1}</td>
+              <td><strong>${p.title}</strong></td>
+              <td style="text-align: right; font-family: 'JetBrains Mono', monospace">${fmtCit(p.citation_count)}</td>
+              <td style="text-align: center; color: #6b7280">${p.update_date ? String(p.update_date).slice(0, 4) : '—'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : '';
+
+    // Generate citation distribution HTML
+    const citDistHtml = detail.citation_distribution.length > 0 ? `
+      <h2>Citation Distribution</h2>
+      <div class="dist-container">
+        ${detail.citation_distribution.map((d: any) => {
+          const max = Math.max(...detail.citation_distribution.map((x: any) => x.count), 1);
+          const pct = ((d.count / st.paper_count) * 100).toFixed(0);
+          const bucket = d.citation_bucket || d.bucket;
+          return `
+            <div class="dist-row">
+              <span class="dist-label">${bucket} cites</span>
+              <div class="dist-bar-container">
+                <div class="dist-bar" style="width: ${(d.count / max) * 100}%; background: linear-gradient(90deg, ${cat.border} 0%, ${cat.border}cc 100%);"></div>
+              </div>
+              <span class="dist-value">${d.count} <span style="color: #9ca3af">(${pct}%)</span></span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    ` : '';
+
+    // Generate top authors HTML
+    const topAuthorsHtml = detail.top_authors.length > 0 ? `
+      <h2>Top Authors</h2>
+      <div class="author-grid">
+        ${detail.top_authors.slice(0, 12).map(a => `
+          <div class="author-card">
+            <div class="author-name">${a.name}</div>
+            <div class="author-stats">${a.paper_count} paper${a.paper_count > 1 ? 's' : ''} · ${fmtCit(a.total_citations)} cites</div>
+          </div>
+        `).join('')}
+      </div>
+    ` : '';
+
+    // Generate comparison HTML if applicable
+    const compareHtml = compareData ? `
+      <div class="compare-section">
+        <h2>Comparison: ${detail.label} vs ${compareData.topic_b.label}</h2>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 25%">Metric</th>
+              <th style="text-align: right; color: ${cat.text}">${detail.label}</th>
+              <th style="text-align: right">${compareData.topic_b.label}</th>
+              <th style="text-align: center; width: 100px">Difference</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Papers</strong></td>
+              <td style="text-align: right; font-family: 'JetBrains Mono', monospace">${st.paper_count}</td>
+              <td style="text-align: right; font-family: 'JetBrains Mono', monospace">${compareData.topic_b.stats.paper_count}</td>
+              <td style="text-align: center; color: #6b7280">${Math.abs(st.paper_count - compareData.topic_b.stats.paper_count)}</td>
+            </tr>
+            <tr>
+              <td><strong>Total Citations</strong></td>
+              <td style="text-align: right; font-family: 'JetBrains Mono', monospace">${fmtCit(st.total_citations)}</td>
+              <td style="text-align: right; font-family: 'JetBrains Mono', monospace">${fmtCit(compareData.topic_b.stats.total_citations)}</td>
+              <td style="text-align: center; color: #6b7280">${fmtCit(Math.abs(st.total_citations - compareData.topic_b.stats.total_citations))}</td>
+            </tr>
+            <tr>
+              <td><strong>Avg Citations</strong></td>
+              <td style="text-align: right; font-family: 'JetBrains Mono', monospace">${st.avg_citations.toFixed(1)}</td>
+              <td style="text-align: right; font-family: 'JetBrains Mono', monospace">${compareData.topic_b.stats.avg_citations.toFixed(1)}</td>
+              <td style="text-align: center; color: #6b7280">${Math.abs(st.avg_citations - compareData.topic_b.stats.avg_citations).toFixed(1)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="highlight-box">
+          <strong>${compareData.overlap.shared_author_count}</strong> shared authors ·
+          <strong>${compareData.overlap.shared_paper_count || 0}</strong> cross-citations
+        </div>
+      </div>
+    ` : '';
+
     const w = window.open('', '_blank'); if (!w) return;
-    w.document.write(`<!DOCTYPE html><html><head><title>${detail?.label} Report</title>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Instrument+Serif&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'DM Sans',system-ui;color:#1f2937;padding:32px;max-width:780px;margin:0 auto;font-size:11px}
-    h1{font-family:'Instrument Serif',serif;font-size:22px}h2{font-size:10px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;margin:16px 0 6px}
-    table{width:100%;border-collapse:collapse;margin:6px 0}th{text-align:left;padding:4px 6px;border-bottom:2px solid #e5e7eb;font-weight:600;color:#6b7280;font-size:8px;text-transform:uppercase}
-    td{padding:4px 6px;border-bottom:1px solid #f3f4f6}.footer{margin-top:24px;padding-top:10px;border-top:1px solid #e5e7eb;font-size:9px;color:#9ca3af}
-    @media print{body{padding:16px}}</style></head><body>${reportRef.current.innerHTML}
-    <div class="footer">Generated by ResearchViewer · ${new Date().toLocaleDateString()}</div></body></html>`);
+    w.document.write(`<!DOCTYPE html><html><head><title>${detail.label} Report</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'DM Sans', -apple-system, system-ui; color: #1f2937; padding: 40px; max-width: 900px; margin: 0 auto; font-size: 11px; background: #fafafa; line-height: 1.5; }
+      .header { background: white; border: 1px solid #e5e7eb; padding: 32px; border-radius: 12px; margin-bottom: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+      h1 { font-family: 'Instrument Serif', serif; font-size: 32px; font-weight: 600; margin-bottom: 8px; color: #111827; }
+      .subtitle { font-size: 14px; color: #6b7280; }
+      .category-badge { display: inline-block; padding: 6px 14px; background: ${cat.fill}; color: ${cat.text}; border: 1px solid ${cat.border}; border-radius: 16px; font-size: 11px; font-weight: 600; margin-top: 12px; }
+      h2 { font-size: 12px; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: 0.05em; margin: 28px 0 12px; padding-bottom: 8px; border-bottom: 2px solid #e5e7eb; }
+      .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 20px 0; }
+      .stat-box { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+      .stat-label { font-size: 10px; color: #6b7280; text-transform: uppercase; font-weight: 600; margin-bottom: 6px; letter-spacing: 0.03em; }
+      .stat-value { font-size: 22px; color: #111827; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+      table { width: 100%; border-collapse: collapse; margin: 12px 0; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+      th { text-align: left; padding: 10px 12px; background: #f9fafb; border-bottom: 2px solid #e5e7eb; font-weight: 700; color: #374151; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+      td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; color: #1f2937; font-size: 11px; }
+      tbody tr:last-child td { border-bottom: none; }
+      tbody tr:hover { background: #f9fafb; }
+      .dist-container { background: white; padding: 16px; border-radius: 8px; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+      .dist-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+      .dist-label { width: 90px; font-size: 10px; color: #6b7280; font-weight: 600; text-align: right; }
+      .dist-bar-container { flex: 1; height: 24px; background: #f3f4f6; border-radius: 4px; overflow: hidden; }
+      .dist-bar { height: 100%; border-radius: 4px; transition: width 0.3s; }
+      .dist-value { width: 100px; font-size: 10px; color: #1f2937; font-weight: 600; font-family: 'JetBrains Mono', monospace; text-align: right; }
+      .author-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+      .author-card { background: white; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+      .author-name { font-weight: 600; color: #111827; font-size: 11px; margin-bottom: 4px; }
+      .author-stats { font-size: 9px; color: #6b7280; }
+      .highlight-box { background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%); border: 1px solid #93c5fd; border-radius: 8px; padding: 16px; margin: 16px 0; color: #1e40af; font-size: 12px; text-align: center; font-weight: 500; }
+      .compare-section { background: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0; border: 1px solid #e5e7eb; }
+      .footer { margin-top: 48px; padding-top: 20px; border-top: 2px solid #e5e7eb; font-size: 10px; color: #9ca3af; text-align: center; }
+      strong { font-weight: 700; color: #111827; }
+      @media print { body { padding: 20px; background: white; } .header { page-break-inside: avoid; } table { page-break-inside: avoid; } }
+    </style></head><body>
+    <div class="header">
+      <h1>${detail.label}</h1>
+      <div class="subtitle">${st.paper_count.toLocaleString()} papers · ${st.total_citations.toLocaleString()} total citations · ${st.year_range || 'N/A'}</div>
+      <div class="category-badge">${detail.bucket_value}</div>
+    </div>
+
+    <h2>Overview Statistics</h2>
+    <div class="stat-grid">${statsHtml}</div>
+
+    ${compareHtml}
+    ${topPapersHtml}
+    ${citDistHtml}
+    ${topAuthorsHtml}
+
+    <div class="footer">
+      Generated by <strong>ResearchViewer</strong> on ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+    </div>
+    </body></html>`);
     w.document.close(); setTimeout(() => w.print(), 500);
   };
 
@@ -180,7 +333,7 @@ export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListId
                       <CR label="Max" a={st.max_citations} b={compareData.topic_b.stats.max_citations} />
                     </tbody></table>
                     <div className="mt-3 p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-700">
-                      <div className="flex items-center gap-4">
+                      <div className="flex items-center justify-center gap-4">
                         <div><span className="font-semibold">{compareData.overlap.shared_author_count}</span> shared authors</div>
                         <div><span className="font-semibold">{Math.abs(st.paper_count - compareData.topic_b.stats.paper_count)}</span> paper diff</div>
                         <div><span className="font-semibold">{Math.abs(st.avg_citations - compareData.topic_b.stats.avg_citations).toFixed(1)}</span> avg cite diff</div>
