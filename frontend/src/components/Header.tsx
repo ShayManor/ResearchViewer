@@ -9,10 +9,6 @@ export function Header({ onSearch, onProfile, apiOnline, readCount, username }: 
         <h1 className="font-serif text-xl text-gray-800 tracking-tight" style={{ letterSpacing: '-0.02em' }}>ResearchViewer</h1>
         <div className="h-5 w-px bg-gray-200" />
         <span className="text-sm text-gray-400 font-light">Topic Explorer</span>
-        <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium ${apiOnline ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-red-50 text-red-500 border border-red-200'}`}>
-          <div className={`w-1.5 h-1.5 rounded-full ${apiOnline ? 'bg-emerald-500' : 'bg-red-400'}`} />
-          {apiOnline ? 'Connected' : 'Offline'}
-        </div>
       </div>
       <div className="flex items-center gap-2">
         <button onClick={onSearch} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-all active:scale-[0.97]">
