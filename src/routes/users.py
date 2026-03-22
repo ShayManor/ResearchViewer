@@ -362,7 +362,10 @@ def link_author(user_id):
                 found_dois = set()
 
                 # Get current max ID once at the start
-                max_id = user_db.execute("SELECT COALESCE(MAX(id), 0) FROM user_publications").fetchone()[0]
+                max_id_result = user_db.execute("SELECT COALESCE(MAX(id), 0) FROM user_publications").fetchone()
+                max_id = int(max_id_result[0])
+
+                print(f"DEBUG: Starting max_id = {max_id}, type = {type(max_id)}")
 
                 # Insert papers into user_publications
                 for paper in papers:
@@ -380,20 +383,27 @@ def link_author(user_id):
                     # Increment ID for each publication
                     max_id += 1
 
+                    print(f"DEBUG: Inserting with id={max_id}, user_id={user_id}, title={title[:50]}")
+
+                    # Build parameters explicitly
+                    insert_params = [
+                        max_id,                    # INTEGER for id column
+                        user_id,                   # INTEGER for user_id column
+                        title or 'Untitled',       # VARCHAR for title column
+                        venue,                     # VARCHAR for venue column
+                        year or 2024,              # INTEGER for year column
+                        doi,                       # VARCHAR for doi column
+                        citation_count or 0,       # INTEGER for citation_count column
+                        coauthors                  # VARCHAR[] for coauthors column
+                    ]
+
+                    print(f"DEBUG: Parameters = {[type(p).__name__ for p in insert_params]}")
+
                     # Insert with explicit ID
                     user_db.execute("""
                         INSERT INTO user_publications (id, user_id, title, venue, year, doi, citation_count, coauthors)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, [
-                        max_id,
-                        user_id,
-                        title or 'Untitled',
-                        venue,
-                        year or 2024,
-                        doi,
-                        citation_count or 0,
-                        coauthors
-                    ])
+                    """, insert_params)
 
                     publications_imported += 1
                     total_citations += (citation_count or 0)
