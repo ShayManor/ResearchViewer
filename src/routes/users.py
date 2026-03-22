@@ -362,7 +362,12 @@ def link_author(user_id):
                 found_dois = set()
 
                 # Insert papers into user_publications
-                # Use static SQL that we know works from testing
+                # Use a fresh connection to avoid Flask connection issues
+                import duckdb as fresh_duckdb
+                from src.database import USER_DB_PATH
+
+                fresh_conn = fresh_duckdb.connect(USER_DB_PATH, read_only=False)
+
                 for paper in papers:
                     title, venue, year, doi, citation_count, authors = paper
                     found_dois.add(doi)
@@ -375,9 +380,9 @@ def link_author(user_id):
                         else:
                             coauthors = authors
 
-                    # Use the exact same INSERT that works in direct testing
+                    # Use fresh connection with exact SQL from successful test
                     try:
-                        user_db.execute("""
+                        fresh_conn.execute("""
                             INSERT INTO user_publications (user_id, title, venue, year, doi, citation_count, coauthors)
                             VALUES (?, ?, ?, ?, ?, ?, ?)
                         """, [
@@ -408,6 +413,9 @@ def link_author(user_id):
 
                 # Count how many papers were not found in database
                 publications_not_found = len(paper_dois) - len(found_dois)
+
+                # Close fresh connection
+                fresh_conn.close()
 
             # Commit transaction
             user_db.execute("COMMIT")
