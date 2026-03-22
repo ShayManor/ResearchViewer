@@ -21,7 +21,7 @@ export function StatsBar({ paperCount, drill, microNodeCount, microEdgeCount, to
 
       <div className={`flex items-center gap-1 shrink-0 px-2 py-0.5 rounded-full ${apiOnline ? 'text-emerald-600 bg-emerald-50' : 'text-red-500 bg-red-50'}`}>
         {apiOnline ? <Wifi size={10} /> : <WifiOff size={10} />}
-        <span className="font-medium" style={{ fontSize: '9px' }}>{apiOnline ? 'API' : 'Offline'}</span>
+        <span className="font-medium" style={{ fontSize: '9px' }}>{apiOnline ? 'Online' : 'Offline'}</span>
       </div>
     </div>
   );
