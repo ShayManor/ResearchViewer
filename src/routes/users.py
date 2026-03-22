@@ -361,8 +361,13 @@ def link_author(user_id):
                 # Track which DOIs were found
                 found_dois = set()
 
+                # Query actual table schema to avoid column order issues
+                schema = user_db.execute("DESCRIBE user_publications").fetchall()
+                column_names = [col[0] for col in schema if col[0] != 'id' and col[0] != 'created_at']
+
+                print(f"DEBUG: Actual table columns (excluding id/created_at): {column_names}")
+
                 # Insert papers into user_publications
-                # Let DuckDB auto-generate IDs to avoid schema issues
                 for paper in papers:
                     title, venue, year, doi, citation_count, authors = paper
                     found_dois.add(doi)
@@ -375,24 +380,38 @@ def link_author(user_id):
                         else:
                             coauthors = authors
 
-                    # Insert WITHOUT id - let database handle it
+                    # Build a dict of all possible values
+                    values_dict = {
+                        'user_id': user_id,
+                        'title': title or 'Untitled',
+                        'venue': venue,
+                        'year': year or 2024,
+                        'doi': doi,
+                        'citation_count': citation_count or 0,
+                        'coauthors': coauthors
+                    }
+
+                    # Build INSERT using actual column order
+                    insert_columns = [col for col in column_names if col in values_dict]
+                    insert_values = [values_dict[col] for col in insert_columns]
+                    placeholders = ', '.join(['?'] * len(insert_columns))
+                    columns_str = ', '.join(insert_columns)
+
+                    print(f"DEBUG: INSERT columns: {insert_columns}")
+                    print(f"DEBUG: INSERT values types: {[type(v).__name__ for v in insert_values]}")
+
+                    # Insert with dynamically built query
                     try:
-                        user_db.execute("""
-                            INSERT INTO user_publications (user_id, title, venue, year, doi, citation_count, coauthors)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, [
-                            user_id,
-                            title or 'Untitled',
-                            venue,
-                            year or 2024,
-                            doi,
-                            citation_count or 0,
-                            coauthors
-                        ])
+                        user_db.execute(
+                            f"INSERT INTO user_publications ({columns_str}) VALUES ({placeholders})",
+                            insert_values
+                        )
                     except Exception as insert_error:
                         print(f"ERROR inserting publication: {insert_error}")
                         print(f"  title: {title}")
                         print(f"  doi: {doi}")
+                        print(f"  columns: {insert_columns}")
+                        print(f"  values: {insert_values}")
                         # Continue with other publications even if one fails
                         continue
 
