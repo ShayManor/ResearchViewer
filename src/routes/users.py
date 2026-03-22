@@ -579,7 +579,7 @@ def get_publications(user_id):
 
     publications = df_to_json_serializable(result) if not result.empty else []
 
-    total_citations = db.execute(
+    total_citations = user_db.execute(
         "SELECT SUM(citation_count) FROM user_publications WHERE user_id = ?",
         [user_id]
     ).fetchone()[0] or 0
