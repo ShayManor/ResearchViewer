@@ -77,8 +77,8 @@ def register():
     # Hash password
     password_hash = hash_password(password)
 
-    # Get next user ID
-    max_id = db.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM users").fetchone()[0]
+    # Get next user ID from sequence
+    max_id = db.execute("SELECT nextval('users_id_seq')").fetchone()[0]
 
     # Create user
     db.execute("""
@@ -310,85 +310,106 @@ def link_author(user_id):
     if not author_id:
         return jsonify({"error": "author_id is required"}), 400
 
-    # Validate author exists in data DB
-    author = data_db.execute(
-        "SELECT author_id, name, h_index, works_count, paper_dois FROM authors WHERE author_id = ?",
-        [author_id]
-    ).fetchone()
+    try:
+        # Validate author exists in data DB
+        author = data_db.execute(
+            "SELECT author_id, name, h_index, works_count, paper_dois FROM authors WHERE author_id = ?",
+            [author_id]
+        ).fetchone()
 
-    if not author:
-        return jsonify({"error": "Author not found"}), 404
+        if not author:
+            return jsonify({"error": "Author not found"}), 404
 
-    # Update user in user DB
-    user_db.execute(
-        "UPDATE users SET linked_author_id = ? WHERE id = ?",
-        [author_id, user_id]
-    )
+        # Start transaction
+        user_db.execute("BEGIN TRANSACTION")
 
-    # Import author's publications into user_publications
-    paper_dois = author[4] if author[4] else []
-    publications_imported = 0
-    total_citations = 0
+        try:
+            # Update user in user DB
+            user_db.execute(
+                "UPDATE users SET linked_author_id = ? WHERE id = ?",
+                [author_id, user_id]
+            )
 
-    if paper_dois and len(paper_dois) > 0:
-        # Clear existing publications from this author to avoid duplicates
-        doi_placeholders = ','.join(['?'] * len(paper_dois))
-        user_db.execute(
-            f"DELETE FROM user_publications WHERE user_id = ? AND doi IN ({doi_placeholders})",
-            [user_id] + list(paper_dois)
-        )
+            # Import author's publications into user_publications
+            paper_dois = author[4] if author[4] else []
+            publications_imported = 0
+            total_citations = 0
 
-        # Get papers from data DB
-        papers = data_db.execute(f"""
-            SELECT
-                title,
-                "journal-ref" as venue,
-                YEAR(update_date) as year,
-                doi,
-                citation_count,
-                authors
-            FROM papers
-            WHERE doi IN ({doi_placeholders})
-            AND doi IS NOT NULL
-        """, list(paper_dois)).fetchall()
+            if paper_dois and len(paper_dois) > 0:
+                # Clear existing publications from this author to avoid duplicates
+                doi_placeholders = ','.join(['?'] * len(paper_dois))
+                user_db.execute(
+                    f"DELETE FROM user_publications WHERE user_id = ? AND doi IN ({doi_placeholders})",
+                    [user_id] + list(paper_dois)
+                )
 
-        # Insert papers into user_publications
-        for paper in papers:
-            title, venue, year, doi, citation_count, authors = paper
+                # Get papers from data DB
+                papers = data_db.execute(f"""
+                    SELECT
+                        title,
+                        "journal-ref" as venue,
+                        YEAR(update_date) as year,
+                        doi,
+                        citation_count,
+                        authors
+                    FROM papers
+                    WHERE doi IN ({doi_placeholders})
+                    AND doi IS NOT NULL
+                """, list(paper_dois)).fetchall()
 
-            # Parse coauthors - split by comma if string
-            coauthors = []
-            if authors:
-                if isinstance(authors, str):
-                    coauthors = [a.strip() for a in authors.split(',') if a.strip()]
-                else:
-                    coauthors = authors
+                # Insert papers into user_publications
+                for paper in papers:
+                    title, venue, year, doi, citation_count, authors = paper
 
-            user_db.execute("""
-                INSERT INTO user_publications (user_id, title, venue, year, doi, citation_count, coauthors, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """, [
-                user_id,
-                title or 'Untitled',
-                venue,
-                year or 2024,
-                doi,
-                citation_count or 0,
-                coauthors
-            ])
+                    # Parse coauthors - split by comma if string
+                    coauthors = []
+                    if authors:
+                        if isinstance(authors, str):
+                            coauthors = [a.strip() for a in authors.split(',') if a.strip()]
+                        else:
+                            coauthors = authors
 
-            publications_imported += 1
-            total_citations += (citation_count or 0)
+                    user_db.execute("""
+                        INSERT INTO user_publications (user_id, title, venue, year, doi, citation_count, coauthors)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        user_id,
+                        title or 'Untitled',
+                        venue,
+                        year or 2024,
+                        doi,
+                        citation_count or 0,
+                        coauthors
+                    ])
 
-    return jsonify({
-        "status": "linked",
-        "author_id": author[0],
-        "author_name": author[1],
-        "h_index": author[2],
-        "works_count": author[3],
-        "publications_imported": publications_imported,
-        "total_citations": total_citations
-    })
+                    publications_imported += 1
+                    total_citations += (citation_count or 0)
+
+            # Commit transaction
+            user_db.execute("COMMIT")
+
+            return jsonify({
+                "status": "linked",
+                "author_id": author[0],
+                "author_name": author[1],
+                "h_index": author[2],
+                "works_count": author[3],
+                "publications_imported": publications_imported,
+                "total_citations": total_citations
+            })
+
+        except Exception as e:
+            # Rollback on any error
+            user_db.execute("ROLLBACK")
+            raise e
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "error": "Failed to link author",
+            "details": str(e)
+        }), 500
 
 
 @users_bp.route("/api/users/<int:user_id>/link-author", methods=["DELETE"])
@@ -664,17 +685,24 @@ def add_publication(user_id):
     if not title or not year:
         return jsonify({"error": "Title and year are required"}), 400
 
-    # Get next ID
-    max_id = db.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM user_publications").fetchone()[0]
+    try:
+        # Insert publication (ID will be auto-generated by sequence)
+        # Use RETURNING to get the generated ID
+        result = db.execute("""
+            INSERT INTO user_publications
+            (user_id, title, venue, year, doi, citation_count, coauthors)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+        """, [user_id, title, venue, year, doi, citation_count, coauthors]).fetchone()
 
-    # Insert publication
-    db.execute("""
-        INSERT INTO user_publications
-        (id, user_id, title, venue, year, doi, citation_count, coauthors, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    """, [max_id, user_id, title, venue, year, doi, citation_count, coauthors])
+        new_id = result[0]
 
-    return jsonify({"status": "created", "id": max_id}), 201
+        return jsonify({"status": "created", "id": new_id}), 201
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "Failed to add publication", "details": str(e)}), 500
 
 
 @users_bp.route("/api/users/<int:user_id>/publications/<int:pub_id>", methods=["PUT"])

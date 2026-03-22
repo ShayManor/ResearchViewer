@@ -81,9 +81,11 @@ created_at,TIMESTAMP,YES,,CURRENT_TIMESTAMP,
 
 
 TODO:
-1) Fix the many many bugs in the frontend
-2) Put API + Database onto GCE/Runpod that serves frontend 
-3) HTTPS + Networking + Redis
+1) Make sure everything works on frontend
+2) Redis
+3) Login page with username + password
+4) Google login + firebase
+5) Video
 ## Features
 
 ### Paper Analyzer
