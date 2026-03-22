@@ -192,13 +192,13 @@ def count_papers():
 
 @papers_bp.route("/api/papers/<path:paper_id>", methods=["GET"])
 def get_paper(paper_id):
-    """Get single paper by arXiv ID. Returns full paper details including microtopics."""
+    """Get single paper by arXiv ID or DOI. Returns full paper details including microtopics."""
     db = get_db()
 
-    # Get paper details
+    # Get paper details (search by both id and doi to handle both formats)
     result = db.execute(
-        "SELECT * FROM papers WHERE id = ? AND (deleted = false OR deleted IS NULL)",
-        [paper_id]
+        "SELECT * FROM papers WHERE (id = ? OR lower(doi) = lower(?)) AND (deleted = false OR deleted IS NULL)",
+        [paper_id, paper_id]
     ).fetchdf()
 
     if result.empty:

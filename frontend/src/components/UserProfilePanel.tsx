@@ -14,6 +14,7 @@ export function UserProfilePanel({ userId, onClose }: Props) {
   const [authorQ, setAuthorQ] = useState('');
   const [authorRes, setAuthorRes] = useState<{ author_id: string; name: string; h_index?: number; works_count?: number }[]>([]);
   const [searching, setSearching] = useState(false);
+  const [linking, setLinking] = useState(false);
   const [pubTitle, setPubTitle] = useState('');
   const [pubVenue, setPubVenue] = useState('');
   const [pubYear, setPubYear] = useState(new Date().getFullYear());
@@ -50,10 +51,38 @@ export function UserProfilePanel({ userId, onClose }: Props) {
     setSearching(false);
   };
   const linkAuthor = async (aid: string) => {
-    try { const r = await api.linkAuthor(userId, aid); setProfile(p => p ? { ...p, linked_author_id: aid, linked_author_name: r.author_name } : p); setAuthorRes([]); setAuthorQ(''); } catch {}
+    setLinking(true);
+    try {
+      const r = await api.linkAuthor(userId, aid);
+      // Show feedback message
+      if (r.message) {
+        alert(r.message);
+      }
+      // Reload all user data after linking
+      const [u, p] = await Promise.all([api.getUser(userId), api.getPublications(userId)]);
+      setProfile(u);
+      setPubs(p.publications);
+      setPubCites(p.total_citations);
+      setAuthorRes([]);
+      setAuthorQ('');
+    } catch (err) {
+      console.error('Failed to link author:', err);
+      alert('Failed to link author. Please try again.');
+    } finally {
+      setLinking(false);
+    }
   };
   const unlinkAuthor = async () => {
-    try { await api.unlinkAuthor(userId); setProfile(p => p ? { ...p, linked_author_id: undefined, linked_author_name: undefined } : p); } catch {}
+    try {
+      await api.unlinkAuthor(userId);
+      // Reload all user data after unlinking
+      const [u, p] = await Promise.all([api.getUser(userId), api.getPublications(userId)]);
+      setProfile(u);
+      setPubs(p.publications);
+      setPubCites(p.total_citations);
+    } catch (err) {
+      console.error('Failed to unlink author:', err);
+    }
   };
   const addPub = async () => {
     if (!pubTitle.trim()) return;
@@ -199,10 +228,10 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                     <button onClick={searchAuthor} disabled={searching} className="px-3 py-2 rounded-lg bg-gray-800 text-white text-sm font-medium disabled:opacity-50">{searching ? <Loader2 size={14} className="animate-spin" /> : 'Search'}</button>
                   </div>
                   {authorRes.length > 0 && <div className="space-y-1">{authorRes.map(a => (
-                    <button key={a.author_id} onClick={() => linkAuthor(a.author_id)} className="w-full flex items-center gap-2 p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-left">
+                    <button key={a.author_id} onClick={() => linkAuthor(a.author_id)} disabled={linking} className="w-full flex items-center gap-2 p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-left disabled:opacity-50 disabled:cursor-not-allowed">
                       <User size={14} className="text-gray-400 shrink-0" /><div className="flex-1 min-w-0"><p className="text-sm font-medium text-gray-700">{a.name}</p>
                       <div className="flex gap-3 text-[10px] text-gray-400">{a.h_index != null && <span>h: {a.h_index}</span>}{a.works_count != null && <span>{a.works_count} papers</span>}</div></div>
-                      <Link2 size={12} className="text-gray-300 shrink-0" /></button>))}</div>}
+                      {linking ? <Loader2 size={12} className="animate-spin text-blue-500 shrink-0" /> : <Link2 size={12} className="text-gray-300 shrink-0" />}</button>))}</div>}
                 </div>)}
               </div>
               <div><p className="text-[10px] font-semibold text-gray-400 uppercase mb-2">Your Publications</p>

@@ -333,6 +333,7 @@ def link_author(user_id):
             # Import author's publications into user_publications
             paper_dois = author[4] if author[4] else []
             publications_imported = 0
+            publications_not_found = 0
             total_citations = 0
 
             if paper_dois and len(paper_dois) > 0:
@@ -357,9 +358,13 @@ def link_author(user_id):
                     AND doi IS NOT NULL
                 """, list(paper_dois)).fetchall()
 
+                # Track which DOIs were found
+                found_dois = set()
+
                 # Insert papers into user_publications
                 for paper in papers:
                     title, venue, year, doi, citation_count, authors = paper
+                    found_dois.add(doi)
 
                     # Parse coauthors - split by comma if string
                     coauthors = []
@@ -385,6 +390,9 @@ def link_author(user_id):
                     publications_imported += 1
                     total_citations += (citation_count or 0)
 
+                # Count how many papers were not found in database
+                publications_not_found = len(paper_dois) - len(found_dois)
+
             # Commit transaction
             user_db.execute("COMMIT")
 
@@ -395,7 +403,10 @@ def link_author(user_id):
                 "h_index": author[2],
                 "works_count": author[3],
                 "publications_imported": publications_imported,
-                "total_citations": total_citations
+                "publications_not_found": publications_not_found,
+                "total_citations": total_citations,
+                "message": f"Imported {publications_imported} of {len(paper_dois)} publications" +
+                          (f" ({publications_not_found} not found in database)" if publications_not_found > 0 else "")
             })
 
         except Exception as e:
