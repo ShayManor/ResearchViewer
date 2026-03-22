@@ -300,7 +300,7 @@ def update_user(user_id):
 
 @users_bp.route("/api/users/<int:user_id>/link-author", methods=["PUT"])
 def link_author(user_id):
-    """Link an author profile to user account."""
+    """Link an author profile to user account and import their publications."""
     user_db = get_user_db()
     data_db = get_data_db()
     data = request.get_json()
@@ -312,7 +312,7 @@ def link_author(user_id):
 
     # Validate author exists in data DB
     author = data_db.execute(
-        "SELECT author_id, name, h_index, works_count FROM authors WHERE author_id = ?",
+        "SELECT author_id, name, h_index, works_count, paper_dois FROM authors WHERE author_id = ?",
         [author_id]
     ).fetchone()
 
@@ -325,12 +325,69 @@ def link_author(user_id):
         [author_id, user_id]
     )
 
+    # Import author's publications into user_publications
+    paper_dois = author[4] if author[4] else []
+    publications_imported = 0
+    total_citations = 0
+
+    if paper_dois and len(paper_dois) > 0:
+        # Clear existing publications from this author to avoid duplicates
+        doi_placeholders = ','.join(['?'] * len(paper_dois))
+        user_db.execute(
+            f"DELETE FROM user_publications WHERE user_id = ? AND doi IN ({doi_placeholders})",
+            [user_id] + list(paper_dois)
+        )
+
+        # Get papers from data DB
+        papers = data_db.execute(f"""
+            SELECT
+                title,
+                "journal-ref" as venue,
+                YEAR(update_date) as year,
+                doi,
+                citation_count,
+                authors
+            FROM papers
+            WHERE doi IN ({doi_placeholders})
+            AND doi IS NOT NULL
+        """, list(paper_dois)).fetchall()
+
+        # Insert papers into user_publications
+        for paper in papers:
+            title, venue, year, doi, citation_count, authors = paper
+
+            # Parse coauthors - split by comma if string
+            coauthors = []
+            if authors:
+                if isinstance(authors, str):
+                    coauthors = [a.strip() for a in authors.split(',') if a.strip()]
+                else:
+                    coauthors = authors
+
+            user_db.execute("""
+                INSERT INTO user_publications (user_id, title, venue, year, doi, citation_count, coauthors, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, [
+                user_id,
+                title or 'Untitled',
+                venue,
+                year or 2024,
+                doi,
+                citation_count or 0,
+                coauthors
+            ])
+
+            publications_imported += 1
+            total_citations += (citation_count or 0)
+
     return jsonify({
         "status": "linked",
         "author_id": author[0],
         "author_name": author[1],
         "h_index": author[2],
-        "works_count": author[3]
+        "works_count": author[3],
+        "publications_imported": publications_imported,
+        "total_citations": total_citations
     })
 
 
