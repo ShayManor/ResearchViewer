@@ -336,13 +336,16 @@ def link_author(user_id):
             publications_not_found = 0
             total_citations = 0
 
+            # FIRST: Clear ALL existing auto-imported publications for this user
+            # (Keep only manually added ones, which have no DOI from papers table)
+            # Delete any publication that has a DOI - these are auto-imported
+            user_db.execute(
+                "DELETE FROM user_publications WHERE user_id = ? AND doi IS NOT NULL AND doi != ''",
+                [user_id]
+            )
+
             if paper_dois and len(paper_dois) > 0:
-                # Clear existing publications from this author to avoid duplicates
                 doi_placeholders = ','.join(['?'] * len(paper_dois))
-                user_db.execute(
-                    f"DELETE FROM user_publications WHERE user_id = ? AND doi IN ({doi_placeholders})",
-                    [user_id] + list(paper_dois)
-                )
 
                 # Get papers from data DB
                 papers = data_db.execute(f"""
