@@ -28,8 +28,8 @@ def get_microtopics():
     if sort_order not in ['ASC', 'DESC']:
         sort_order = 'DESC'
 
-    # Build query
-    query = "SELECT * FROM microtopics WHERE 1=1"
+    # Build query - ONLY select columns we need (not SELECT *)
+    query = "SELECT microtopic_id, label, bucket_value, size FROM microtopics WHERE 1=1"
     params = []
 
     if bucket_value:
@@ -49,18 +49,14 @@ def get_microtopics():
 
     result = db.execute(query, params).fetchdf()
 
-    # Parse JSON fields
-    microtopics = []
-    for _, row in result.iterrows():
-        topic = {
-            'microtopic_id': row['microtopic_id'],
-            'label': row['label'],
-            'bucket_value': row['bucket_value'],
-            'size': int(row['size']),
-            'top_terms': json.loads(row['top_terms_json']) if row['top_terms_json'] else [],
-            'representative_titles': json.loads(row['representative_titles_json']) if row['representative_titles_json'] else []
-        }
-        microtopics.append(topic)
+    # Fast conversion - use to_dict('records') instead of iterrows
+    if result.empty:
+        microtopics = []
+    else:
+        microtopics = result.to_dict('records')
+        # Convert size to int (DuckDB returns numpy types)
+        for topic in microtopics:
+            topic['size'] = int(topic['size'])
 
     return jsonify({
         "microtopics": microtopics,
