@@ -361,6 +361,9 @@ def link_author(user_id):
                 # Track which DOIs were found
                 found_dois = set()
 
+                # Get current max ID once at the start
+                max_id = user_db.execute("SELECT COALESCE(MAX(id), 0) FROM user_publications").fetchone()[0]
+
                 # Insert papers into user_publications
                 for paper in papers:
                     title, venue, year, doi, citation_count, authors = paper
@@ -374,14 +377,15 @@ def link_author(user_id):
                         else:
                             coauthors = authors
 
-                    # Get next ID from sequence
-                    next_id = user_db.execute("SELECT nextval('user_publications_id_seq')").fetchone()[0]
+                    # Increment ID for each publication
+                    max_id += 1
 
+                    # Insert with explicit ID
                     user_db.execute("""
                         INSERT INTO user_publications (id, user_id, title, venue, year, doi, citation_count, coauthors)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, [
-                        next_id,
+                        max_id,
                         user_id,
                         title or 'Untitled',
                         venue,
