@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify
-from src.database import get_db, DATABASE_PATH
+from src.database import get_data_db as get_db
 
 
 health = Blueprint("health", __name__)
