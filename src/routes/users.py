@@ -383,27 +383,22 @@ def link_author(user_id):
                     # Increment ID for each publication
                     max_id += 1
 
-                    print(f"DEBUG: Inserting with id={max_id}, user_id={user_id}, title={title[:50]}")
+                    print(f"DEBUG: Inserting with id={max_id}, user_id={user_id}, title={title[:50] if title else 'None'}")
 
-                    # Build parameters explicitly
-                    insert_params = [
-                        max_id,                    # INTEGER for id column
-                        user_id,                   # INTEGER for user_id column
-                        title or 'Untitled',       # VARCHAR for title column
-                        venue,                     # VARCHAR for venue column
-                        year or 2024,              # INTEGER for year column
-                        doi,                       # VARCHAR for doi column
-                        citation_count or 0,       # INTEGER for citation_count column
-                        coauthors                  # VARCHAR[] for coauthors column
-                    ]
-
-                    print(f"DEBUG: Parameters = {[type(p).__name__ for p in insert_params]}")
-
-                    # Insert with explicit ID
+                    # Insert with explicit ID - pass parameters directly
                     user_db.execute("""
                         INSERT INTO user_publications (id, user_id, title, venue, year, doi, citation_count, coauthors)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, insert_params)
+                    """, [
+                        int(max_id),
+                        int(user_id),
+                        str(title or 'Untitled'),
+                        venue,
+                        int(year or 2024),
+                        doi,
+                        int(citation_count or 0),
+                        list(coauthors) if coauthors else []
+                    ])
 
                     publications_imported += 1
                     total_citations += (citation_count or 0)
