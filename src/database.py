@@ -39,7 +39,10 @@ def get_data_db() -> duckdb.DuckDBPyConnection:
     """Return read-only connection to data database (per Flask request)."""
     db = g.get("data_db")
     if db is None:
-        db = duckdb.connect(DATA_DB_PATH, read_only=True)
+        # In test mode, allow writes to the data database
+        # In production, enforce read-only mode for data integrity
+        is_testing = os.getenv('TESTING') == '1'
+        db = duckdb.connect(DATA_DB_PATH, read_only=(not is_testing))
         g.data_db = db
     return db
 

@@ -14,9 +14,12 @@ TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(TESTS_DIR)
 TEST_DB_PATH = os.path.join(TESTS_DIR, 'test_data.db')
 
-# Set environment variable for test database IMMEDIATELY
-os.environ['DATABASE_PATH'] = TEST_DB_PATH
-os.environ['TESTING'] = '1'
+# Set environment variables for test database IMMEDIATELY
+# Point both user and data DB to the same test database
+os.environ['DATABASE_PATH'] = TEST_DB_PATH  # Legacy
+os.environ['USER_DB_PATH'] = TEST_DB_PATH   # User tables
+os.environ['DATA_DB_PATH'] = TEST_DB_PATH   # Data tables (papers, authors, etc.)
+os.environ['TESTING'] = '1'                 # Enable test mode (read-write for data DB)
 
 # Add project root to Python path
 sys.path.insert(0, PROJECT_ROOT)
