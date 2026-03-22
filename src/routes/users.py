@@ -361,13 +361,8 @@ def link_author(user_id):
                 # Track which DOIs were found
                 found_dois = set()
 
-                # Get current max ID once at the start
-                max_id_result = user_db.execute("SELECT COALESCE(MAX(id), 0) FROM user_publications").fetchone()
-                max_id = int(max_id_result[0])
-
-                print(f"DEBUG: Starting max_id = {max_id}, type = {type(max_id)}")
-
                 # Insert papers into user_publications
+                # Let DuckDB auto-generate IDs to avoid schema issues
                 for paper in papers:
                     title, venue, year, doi, citation_count, authors = paper
                     found_dois.add(doi)
@@ -380,25 +375,26 @@ def link_author(user_id):
                         else:
                             coauthors = authors
 
-                    # Increment ID for each publication
-                    max_id += 1
-
-                    print(f"DEBUG: Inserting with id={max_id}, user_id={user_id}, title={title[:50] if title else 'None'}")
-
-                    # Insert with explicit ID - pass parameters directly
-                    user_db.execute("""
-                        INSERT INTO user_publications (id, user_id, title, venue, year, doi, citation_count, coauthors)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, [
-                        int(max_id),
-                        int(user_id),
-                        str(title or 'Untitled'),
-                        venue,
-                        int(year or 2024),
-                        doi,
-                        int(citation_count or 0),
-                        list(coauthors) if coauthors else []
-                    ])
+                    # Insert WITHOUT id - let database handle it
+                    try:
+                        user_db.execute("""
+                            INSERT INTO user_publications (user_id, title, venue, year, doi, citation_count, coauthors)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, [
+                            user_id,
+                            title or 'Untitled',
+                            venue,
+                            year or 2024,
+                            doi,
+                            citation_count or 0,
+                            coauthors
+                        ])
+                    except Exception as insert_error:
+                        print(f"ERROR inserting publication: {insert_error}")
+                        print(f"  title: {title}")
+                        print(f"  doi: {doi}")
+                        # Continue with other publications even if one fails
+                        continue
 
                     publications_imported += 1
                     total_citations += (citation_count or 0)
