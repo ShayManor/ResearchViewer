@@ -414,9 +414,7 @@ def link_author(user_id):
                 "works_count": author[3],
                 "publications_imported": publications_imported,
                 "publications_not_found": publications_not_found,
-                "total_citations": total_citations,
-                "message": f"Imported {publications_imported} of {len(paper_dois)} publications" +
-                          (f" ({publications_not_found} not found in database)" if publications_not_found > 0 else "")
+                "total_citations": total_citations
             })
 
         except Exception as e:
