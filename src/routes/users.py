@@ -301,7 +301,8 @@ def update_user(user_id):
 @users_bp.route("/api/users/<int:user_id>/link-author", methods=["PUT"])
 def link_author(user_id):
     """Link an author profile to user account."""
-    db = get_user_db()
+    user_db = get_user_db()
+    data_db = get_data_db()
     data = request.get_json()
 
     author_id = data.get('author_id')
@@ -309,8 +310,8 @@ def link_author(user_id):
     if not author_id:
         return jsonify({"error": "author_id is required"}), 400
 
-    # Validate author exists
-    author = db.execute(
+    # Validate author exists in data DB
+    author = data_db.execute(
         "SELECT author_id, name, h_index, works_count FROM authors WHERE author_id = ?",
         [author_id]
     ).fetchone()
@@ -318,8 +319,8 @@ def link_author(user_id):
     if not author:
         return jsonify({"error": "Author not found"}), 404
 
-    # Update user
-    db.execute(
+    # Update user in user DB
+    user_db.execute(
         "UPDATE users SET linked_author_id = ? WHERE id = ?",
         [author_id, user_id]
     )
