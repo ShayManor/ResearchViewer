@@ -393,17 +393,7 @@ def link_author(user_id):
                             citation_count or 0,
                             coauthors
                         ])
-                    except Exception as insert_error:
-                        print(f"ERROR inserting publication: {insert_error}")
-                        print(f"  user_id={user_id}, type={type(user_id)}")
-                        print(f"  title={title}, type={type(title)}")
-                        print(f"  venue={venue}, type={type(venue)}")
-                        print(f"  year={year}, type={type(year)}")
-                        print(f"  doi={doi}, type={type(doi)}")
-                        print(f"  citation_count={citation_count}, type={type(citation_count)}")
-                        print(f"  coauthors={coauthors}, type={type(coauthors)}")
-                        import traceback
-                        traceback.print_exc()
+                    except Exception:
                         # Continue with other publications even if one fails
                         continue
 
@@ -445,15 +435,34 @@ def link_author(user_id):
 
 @users_bp.route("/api/users/<int:user_id>/link-author", methods=["DELETE"])
 def unlink_author(user_id):
-    """Unlink author profile from user account."""
+    """Unlink author profile from user account and remove auto-imported publications."""
     db = get_user_db()
 
-    db.execute(
-        "UPDATE users SET linked_author_id = NULL WHERE id = ?",
-        [user_id]
-    )
+    # Start transaction
+    db.execute("BEGIN TRANSACTION")
 
-    return jsonify({"status": "unlinked"})
+    try:
+        # Delete all auto-imported publications (those with DOIs)
+        db.execute(
+            "DELETE FROM user_publications WHERE user_id = ? AND doi IS NOT NULL AND doi != ''",
+            [user_id]
+        )
+
+        # Unlink author
+        db.execute(
+            "UPDATE users SET linked_author_id = NULL WHERE id = ?",
+            [user_id]
+        )
+
+        # Commit transaction
+        db.execute("COMMIT")
+
+        return jsonify({"status": "unlinked"})
+
+    except Exception as e:
+        # Rollback on error
+        db.execute("ROLLBACK")
+        raise e
 
 
 @users_bp.route("/api/users/<int:user_id>/reading-list", methods=["GET"])

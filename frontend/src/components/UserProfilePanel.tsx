@@ -54,19 +54,16 @@ export function UserProfilePanel({ userId, onClose }: Props) {
     setLinking(true);
     try {
       const r = await api.linkAuthor(userId, aid);
-      // Show feedback message
       if (r.message) {
         alert(r.message);
       }
-      // Reload all user data after linking
       const [u, p] = await Promise.all([api.getUser(userId), api.getPublications(userId)]);
       setProfile(u);
       setPubs(p.publications);
       setPubCites(p.total_citations);
       setAuthorRes([]);
       setAuthorQ('');
-    } catch (err) {
-      console.error('Failed to link author:', err);
+    } catch {
       alert('Failed to link author. Please try again.');
     } finally {
       setLinking(false);
@@ -75,13 +72,12 @@ export function UserProfilePanel({ userId, onClose }: Props) {
   const unlinkAuthor = async () => {
     try {
       await api.unlinkAuthor(userId);
-      // Reload all user data after unlinking
       const [u, p] = await Promise.all([api.getUser(userId), api.getPublications(userId)]);
       setProfile(u);
       setPubs(p.publications);
       setPubCites(p.total_citations);
-    } catch (err) {
-      console.error('Failed to unlink author:', err);
+    } catch {
+      alert('Failed to unlink author. Please try again.');
     }
   };
   const addPub = async () => {
