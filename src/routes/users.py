@@ -374,10 +374,14 @@ def link_author(user_id):
                         else:
                             coauthors = authors
 
+                    # Get next ID from sequence
+                    next_id = user_db.execute("SELECT nextval('user_publications_id_seq')").fetchone()[0]
+
                     user_db.execute("""
-                        INSERT INTO user_publications (user_id, title, venue, year, doi, citation_count, coauthors)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO user_publications (id, user_id, title, venue, year, doi, citation_count, coauthors)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, [
+                        next_id,
                         user_id,
                         title or 'Untitled',
                         venue,
