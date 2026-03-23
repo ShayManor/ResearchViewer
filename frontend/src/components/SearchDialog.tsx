@@ -107,7 +107,6 @@ export function SearchDialog({ onClose, onAddToList, onMarkAsRead, readingListId
   useEffect(() => {
     inputRef.current?.focus();
     const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
       // Trigger search immediately on Enter key
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
