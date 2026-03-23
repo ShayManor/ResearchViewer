@@ -52,6 +52,11 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
 
+  // Left panel (microtopic) resizing
+  const [leftPanelWidth, setLeftPanelWidth] = useState(480);
+  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
+  const [isResizingLeft, setIsResizingLeft] = useState(false);
+
   // ── Bootstrap ──────────────────────────────────────────────
   useEffect(() => {
     api.health().then(h => { setApiOnline(true); setPaperCount(h.paper_count); }).catch(() => setApiOnline(false));
@@ -122,6 +127,10 @@ export default function App() {
     setIsResizing(true);
   }, []);
 
+  const handleLeftResizeStart = useCallback(() => {
+    setIsResizingLeft(true);
+  }, []);
+
   useEffect(() => {
     if (!isResizing) return;
 
@@ -145,14 +154,63 @@ export default function App() {
     };
   }, [isResizing]);
 
+  useEffect(() => {
+    if (!isResizingLeft) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = e.clientX;
+      if (newWidth >= 300 && newWidth <= 800) {
+        setLeftPanelWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingLeft(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingLeft]);
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <Header onSearch={() => setSearchOpen(true)} onProfile={() => setProfileOpen(true)} apiOnline={apiOnline} readCount={readingListIds.size} username={username} />
 
       <div className="flex flex-1 overflow-hidden">
-        {selectedMicro && (
-          <div className={`${isComparing ? 'w-[680px]' : 'w-[480px]'} shrink-0 border-r border-gray-200/80 overflow-x-hidden bg-white transition-all duration-300`}>
-            <MicrotopicPanel microtopicId={selectedMicro} allNodes={microNodes} onClose={() => setSelectedMicro(null)}
+        {selectedMicro && !leftPanelCollapsed && (
+          <div
+            className="shrink-0 border-r border-gray-200/80 overflow-x-hidden bg-white relative group"
+            style={{ width: isComparing ? `${leftPanelWidth * 1.4}px` : `${leftPanelWidth}px` }}
+          >
+            {/* Resize handle - right edge */}
+            <div
+              onMouseDown={handleLeftResizeStart}
+              className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/50 transition-colors z-10 group-hover:bg-gray-300/50"
+            >
+              <div className="absolute right-1/2 top-1/2 -translate-y-1/2 translate-x-1/2 w-1.5 h-12 flex flex-col items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="w-1 h-1 bg-gray-500 rounded-full" />
+                <div className="w-1 h-1 bg-gray-500 rounded-full" />
+                <div className="w-1 h-1 bg-gray-500 rounded-full" />
+              </div>
+            </div>
+
+            {/* Close button */}
+            <button
+              onClick={() => { setSelectedMicro(null); setLeftPanelCollapsed(false); }}
+              className="absolute left-2 top-2 z-10 p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+              title="Close panel"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+
+            <MicrotopicPanel microtopicId={selectedMicro} allNodes={microNodes} onClose={() => { setSelectedMicro(null); setLeftPanelCollapsed(false); }}
               readingListIds={readingListIds} onAddToList={addToList} onRemoveFromList={removeFromList} userId={USER_ID}
               onCompareModeChange={setIsComparing} />
           </div>
@@ -188,8 +246,10 @@ export default function App() {
               onMouseDown={handleResizeStart}
               className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/50 transition-colors z-10 group-hover:bg-gray-300/50"
             >
-              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-12 flex items-center justify-center">
-                <div className="w-1 h-8 bg-gray-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-12 flex flex-col items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="w-1 h-1 bg-gray-500 rounded-full" />
+                <div className="w-1 h-1 bg-gray-500 rounded-full" />
+                <div className="w-1 h-1 bg-gray-500 rounded-full" />
               </div>
             </div>
 
