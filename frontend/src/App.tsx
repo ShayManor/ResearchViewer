@@ -46,7 +46,11 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Right sidebar resizing
+  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
 
   // ── Bootstrap ──────────────────────────────────────────────
   useEffect(() => {
@@ -113,6 +117,34 @@ export default function App() {
     return () => window.removeEventListener('keydown', h);
   }, []);
 
+  // ── Sidebar resize handlers ────────────────────────────────
+  const handleResizeStart = useCallback(() => {
+    setIsResizing(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = window.innerWidth - e.clientX;
+      if (newWidth >= 200 && newWidth <= 600) {
+        setSidebarWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <Header onSearch={() => setSearchOpen(true)} onProfile={() => setProfileOpen(true)} apiOnline={apiOnline} readCount={readingListIds.size} username={username} />
@@ -143,40 +175,48 @@ export default function App() {
             onMicroClick={setSelectedMicro}
             onBack={drillBack}
           />
+        </div>
 
-          {/* Mobile sidebar toggle button */}
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="md:hidden fixed bottom-20 right-4 z-40 w-12 h-12 rounded-full bg-gray-800 text-white shadow-lg flex items-center justify-center hover:bg-gray-700 transition-all"
-            aria-label="Toggle sidebar"
+        {/* Right sidebar with resize handle */}
+        {!sidebarCollapsed ? (
+          <div
+            className="shrink-0 border-l border-gray-200/80 overflow-hidden bg-white relative group"
+            style={{ width: `${sidebarWidth}px` }}
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              {sidebarOpen ? (
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              )}
+            {/* Resize handle */}
+            <div
+              onMouseDown={handleResizeStart}
+              className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/50 transition-colors z-10 group-hover:bg-gray-300/50"
+            >
+              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-12 flex items-center justify-center">
+                <div className="w-1 h-8 bg-gray-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
+            </div>
+
+            {/* Close button */}
+            <button
+              onClick={() => setSidebarCollapsed(true)}
+              className="absolute right-2 top-2 z-10 p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+              title="Collapse sidebar"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+
+            <RightSidebar userId={USER_ID} readingListIds={readingListIds} onRemoveFromList={removeFromList} onAddToList={addToList} onMarkAsRead={markAsRead} />
+          </div>
+        ) : (
+          /* Collapsed sidebar - reopening tab */
+          <button
+            onClick={() => setSidebarCollapsed(false)}
+            className="shrink-0 w-8 bg-white border-l border-gray-200/80 hover:bg-gray-50 transition-colors flex items-center justify-center group"
+            title="Expand sidebar"
+          >
+            <svg className="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-        </div>
-
-        {/* Desktop: always visible, Mobile: overlay when open */}
-        <div className={`
-          md:w-[300px] md:shrink-0 md:relative
-          w-[300px] fixed md:translate-x-0 right-0 top-14 bottom-0 z-30
-          border-l border-gray-200/80 overflow-hidden bg-white
-          transition-transform duration-300 ease-in-out
-          ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'}
-        `}>
-          <RightSidebar userId={USER_ID} readingListIds={readingListIds} onRemoveFromList={removeFromList} onAddToList={addToList} onMarkAsRead={markAsRead} />
-        </div>
-
-        {/* Mobile backdrop */}
-        {sidebarOpen && (
-          <div
-            className="md:hidden fixed inset-0 bg-black/20 backdrop-blur-sm z-20"
-            onClick={() => setSidebarOpen(false)}
-          />
         )}
       </div>
 
