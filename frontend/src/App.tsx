@@ -7,7 +7,7 @@ import { SearchDialog } from './components/SearchDialog';
 import { UserProfilePanel } from './components/UserProfilePanel';
 import { AboutPanel } from './components/AboutPanel';
 import { StatsBar } from './components/StatsBar';
-import { api, type DomainEntry, type TopicEntry, type GraphNode, type GraphEdge, type VelocityRes } from './lib/api';
+import { api, type DomainEntry, type TopicEntry, type GraphNode, type GraphEdge } from './lib/api';
 
 const USER_ID = 1;
 
@@ -20,7 +20,6 @@ interface DrillState {
 export default function App() {
   const [apiOnline, setApiOnline] = useState(false);
   const [paperCount, setPaperCount] = useState<number | null>(null);
-  const [velocity, setVelocity] = useState<VelocityRes | null>(null);
   const [username, setUsername] = useState<string>('');
 
   // Drill state
@@ -47,12 +46,12 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // ── Bootstrap ──────────────────────────────────────────────
   useEffect(() => {
     api.health().then(h => { setApiOnline(true); setPaperCount(h.paper_count); }).catch(() => setApiOnline(false));
     api.getDomains(100).then(d => setDomains(d.domains)).catch(() => {});
-    api.velocity('week', 12).then(setVelocity).catch(() => {});
     api.getReadingList(USER_ID).then(d => setReadingListIds(new Set(d.papers.map(p => p.id)))).catch(() => {});
     api.getUser(USER_ID).then(u => setUsername(u.username)).catch(() => {});
   }, []);
@@ -144,14 +143,44 @@ export default function App() {
             onMicroClick={setSelectedMicro}
             onBack={drillBack}
           />
+
+          {/* Mobile sidebar toggle button */}
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="md:hidden fixed bottom-20 right-4 z-40 w-12 h-12 rounded-full bg-gray-800 text-white shadow-lg flex items-center justify-center hover:bg-gray-700 transition-all"
+            aria-label="Toggle sidebar"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              {sidebarOpen ? (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              )}
+            </svg>
+          </button>
         </div>
 
-        <div className="w-[300px] shrink-0 border-l border-gray-200/80 overflow-hidden bg-white">
-          <RightSidebar userId={USER_ID} readingListIds={readingListIds} onRemoveFromList={removeFromList} onAddToList={addToList} velocity={velocity} onMarkAsRead={markAsRead} />
+        {/* Desktop: always visible, Mobile: overlay when open */}
+        <div className={`
+          md:w-[300px] md:shrink-0 md:relative
+          w-[300px] fixed md:translate-x-0 right-0 top-14 bottom-0 z-30
+          border-l border-gray-200/80 overflow-hidden bg-white
+          transition-transform duration-300 ease-in-out
+          ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'}
+        `}>
+          <RightSidebar userId={USER_ID} readingListIds={readingListIds} onRemoveFromList={removeFromList} onAddToList={addToList} onMarkAsRead={markAsRead} />
         </div>
+
+        {/* Mobile backdrop */}
+        {sidebarOpen && (
+          <div
+            className="md:hidden fixed inset-0 bg-black/20 backdrop-blur-sm z-20"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
       </div>
 
-      <StatsBar paperCount={paperCount} drill={drill} microNodeCount={microNodes.length} microEdgeCount={microEdges.length} topicCount={topics.length} domainCount={domains.length} velocity={velocity} apiOnline={apiOnline} onAboutClick={() => setAboutOpen(true)} />
+      <StatsBar paperCount={paperCount} drill={drill} microNodeCount={microNodes.length} microEdgeCount={microEdges.length} topicCount={topics.length} domainCount={domains.length} apiOnline={apiOnline} onAboutClick={() => setAboutOpen(true)} />
 
       {searchOpen && <SearchDialog onClose={() => setSearchOpen(false)} onAddToList={addToList} onMarkAsRead={markAsRead} readingListIds={readingListIds} />}
       {profileOpen && <UserProfilePanel userId={USER_ID} onClose={() => setProfileOpen(false)} />}

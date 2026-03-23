@@ -1,14 +1,13 @@
 import { useState, useEffect } from 'react';
-import { BookOpen, Flame, Lightbulb, X, ExternalLink, ChevronDown, ChevronUp, TrendingUp, Loader2, CheckCircle } from 'lucide-react';
+import { BookOpen, Flame, Lightbulb, X, ExternalLink, Loader2, CheckCircle } from 'lucide-react';
 import { fmtCit } from '../lib/colors';
-import { api, type Paper, type Recommendation, type VelocityRes } from '../lib/api';
+import { api, type Paper, type Recommendation } from '../lib/api';
 
-interface Props { userId: number; readingListIds: Set<string>; onRemoveFromList: (id: string) => void; onAddToList: (id: string) => void; velocity: VelocityRes | null; onMarkAsRead?: (id: string) => void; }
+interface Props { userId: number; readingListIds: Set<string>; onRemoveFromList: (id: string) => void; onAddToList: (id: string) => void; onMarkAsRead?: (id: string) => void; }
 type Tab = 'list' | 'hot' | 'recs';
 
-export function RightSidebar({ userId, readingListIds, onRemoveFromList, onAddToList, velocity, onMarkAsRead }: Props) {
+export function RightSidebar({ userId, readingListIds, onRemoveFromList, onAddToList, onMarkAsRead }: Props) {
   const [tab, setTab] = useState<Tab>('list');
-  const [velOpen, setVelOpen] = useState(false);
   const [listPapers, setListPapers] = useState<Paper[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [hotPapers, setHotPapers] = useState<Paper[]>([]);
@@ -34,9 +33,6 @@ export function RightSidebar({ userId, readingListIds, onRemoveFromList, onAddTo
     setRecsLoading(true);
     api.getRecommendations(userId, 8).then(d => setRecs(d.recommendations)).catch(() => setRecs([])).finally(() => setRecsLoading(false));
   }, [tab, userId, readingListIds.size]);
-
-  const vData = velocity?.velocity || [];
-  const maxV = Math.max(...vData.map(v => v.count), 1);
 
   return (
     <div className="flex flex-col h-full">
