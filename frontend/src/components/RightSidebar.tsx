@@ -36,7 +36,7 @@ export function RightSidebar({ userId, readingListIds, onRemoveFromList, onAddTo
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex border-b border-gray-100 shrink-0">
+      <div className="flex border-b border-gray-100 shrink-0 pr-10">
         <TB active={tab === 'list'} onClick={() => setTab('list')} icon={<BookOpen size={12} />} label={`List (${readingListIds.size})`} />
         <TB active={tab === 'hot'} onClick={() => setTab('hot')} icon={<Flame size={12} />} label="Hot" />
         <TB active={tab === 'recs'} onClick={() => setTab('recs')} icon={<Lightbulb size={12} />} label="For You" />
