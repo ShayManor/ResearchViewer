@@ -188,11 +188,11 @@ export default function App() {
             style={{ width: isComparing ? `${leftPanelWidth * 1.4}px` : `${leftPanelWidth}px` }}
           >
             {/* Resize handle - right edge */}
-            <div
-              onMouseDown={handleLeftResizeStart}
-              className="absolute right-0 top-1/2 -translate-y-1/2 -mr-2 z-10 cursor-col-resize"
-            >
-              <div className="px-1 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded flex items-center gap-0.5 transition-colors">
+            <div className="absolute right-0 top-0 bottom-0 w-4 flex items-center justify-center z-10 group/resize">
+              <div
+                onMouseDown={handleLeftResizeStart}
+                className="px-1 py-2 bg-gray-100 border border-gray-300 rounded flex items-center gap-0.5 cursor-col-resize opacity-0 group-hover/resize:opacity-100 hover:!bg-gray-200 transition-all"
+              >
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
@@ -242,11 +242,11 @@ export default function App() {
             style={{ width: `${sidebarWidth}px` }}
           >
             {/* Resize handle */}
-            <div
-              onMouseDown={handleResizeStart}
-              className="absolute left-0 top-1/2 -translate-y-1/2 -ml-2 z-10 cursor-col-resize"
-            >
-              <div className="px-1 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded flex items-center gap-0.5 transition-colors">
+            <div className="absolute left-0 top-0 bottom-0 w-4 flex items-center justify-center z-10 group/resize">
+              <div
+                onMouseDown={handleResizeStart}
+                className="px-1 py-2 bg-gray-100 border border-gray-300 rounded flex items-center gap-0.5 cursor-col-resize opacity-0 group-hover/resize:opacity-100 hover:!bg-gray-200 transition-all"
+              >
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
