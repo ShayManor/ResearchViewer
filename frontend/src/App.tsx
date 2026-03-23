@@ -184,20 +184,21 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden">
         {selectedMicro && !leftPanelCollapsed && (
           <div
-            className="shrink-0 border-r border-gray-200/80 overflow-x-hidden bg-white relative group"
+            className="shrink-0 border-r border-gray-200/80 bg-white relative flex"
             style={{ width: isComparing ? `${leftPanelWidth * 1.4}px` : `${leftPanelWidth}px` }}
           >
             {/* Resize handle - left edge, hanging outward */}
-            <div className="absolute left-0 top-0 bottom-0 w-8 flex items-center justify-start z-10 group/resize">
+            <div className="absolute -left-3 top-0 bottom-0 w-6 flex items-center justify-center z-50 group">
               <div
                 onMouseDown={handleLeftResizeStart}
-                className="px-1 py-2 bg-white border border-gray-300 rounded flex items-center gap-0.5 cursor-col-resize opacity-0 group-hover/resize:opacity-100 hover:!bg-gray-50 transition-all shadow-sm -ml-3"
+                className="px-1 py-2 bg-white border border-gray-300 rounded flex items-center gap-0.5 cursor-col-resize group-hover:opacity-100 hover:bg-gray-50 transition-opacity shadow-sm"
               >
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
               </div>
             </div>
+            <div className="flex-1 overflow-x-hidden">
 
             {/* Close button */}
             <button
@@ -210,9 +211,10 @@ export default function App() {
               </svg>
             </button>
 
-            <MicrotopicPanel microtopicId={selectedMicro} allNodes={microNodes} onClose={() => { setSelectedMicro(null); setLeftPanelCollapsed(false); }}
-              readingListIds={readingListIds} onAddToList={addToList} onRemoveFromList={removeFromList} userId={USER_ID}
-              onCompareModeChange={setIsComparing} />
+              <MicrotopicPanel microtopicId={selectedMicro} allNodes={microNodes} onClose={() => { setSelectedMicro(null); setLeftPanelCollapsed(false); }}
+                readingListIds={readingListIds} onAddToList={addToList} onRemoveFromList={removeFromList} userId={USER_ID}
+                onCompareModeChange={setIsComparing} />
+            </div>
           </div>
         )}
 
@@ -238,20 +240,21 @@ export default function App() {
         {/* Right sidebar with resize handle */}
         {!sidebarCollapsed ? (
           <div
-            className="shrink-0 border-l border-gray-200/80 overflow-hidden bg-white relative group"
+            className="shrink-0 border-l border-gray-200/80 bg-white relative flex"
             style={{ width: `${sidebarWidth}px` }}
           >
-            {/* Resize handle - right edge, hanging outward */}
-            <div className="absolute right-0 top-0 bottom-0 w-8 flex items-center justify-end z-10 group/resize">
+            {/* Resize handle - left edge, hanging outward */}
+            <div className="absolute -left-3 top-0 bottom-0 w-6 flex items-center justify-center z-50 group">
               <div
                 onMouseDown={handleResizeStart}
-                className="px-1 py-2 bg-white border border-gray-300 rounded flex items-center gap-0.5 cursor-col-resize opacity-0 group-hover/resize:opacity-100 hover:!bg-gray-50 transition-all shadow-sm -mr-3"
+                className="px-1 py-2 bg-white border border-gray-300 rounded flex items-center gap-0.5 cursor-col-resize group-hover:opacity-100 hover:bg-gray-50 transition-opacity shadow-sm"
               >
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
               </div>
             </div>
+            <div className="flex-1 overflow-hidden">
 
             {/* Close button */}
             <button
@@ -264,7 +267,8 @@ export default function App() {
               </svg>
             </button>
 
-            <RightSidebar userId={USER_ID} readingListIds={readingListIds} onRemoveFromList={removeFromList} onAddToList={addToList} onMarkAsRead={markAsRead} />
+              <RightSidebar userId={USER_ID} readingListIds={readingListIds} onRemoveFromList={removeFromList} onAddToList={addToList} onMarkAsRead={markAsRead} />
+            </div>
           </div>
         ) : (
           /* Collapsed sidebar - reopening tab */
