@@ -4,6 +4,7 @@ import signal
 
 from flask import Flask
 from flask_cors import CORS
+from flask_compress import Compress
 
 from src.database import init_app as init_database, close_db
 from src.cache import cache
@@ -17,6 +18,7 @@ from src.routes.reports import reports_bp
 from src.routes.users import users_bp
 
 app = Flask(__name__, static_folder=None)
+Compress(app)
 
 # Initialize database connection
 init_database(app)

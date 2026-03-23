@@ -1250,3 +1250,229 @@ CREATE INDEX idx_up_user ON user_publications(user_id);
 | `POST` | `/api/reports/subject` | Generate subject report |
 
 **Total: 37 endpoints** (12 existing to modify, 25 new)
+
+Profiling from laptop:
+ ab -n 1000 -c 10 https://researchviewer.org/api/health
+This is ApacheBench, Version 2.3 <$Revision: 1913912 $>
+Copyright 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/
+Licensed to The Apache Software Foundation, http://www.apache.org/
+
+Benchmarking researchviewer.org (be patient)
+Completed 100 requests
+Completed 200 requests
+Completed 300 requests
+Completed 400 requests
+Completed 500 requests
+Completed 600 requests
+Completed 700 requests
+Completed 800 requests
+Completed 900 requests
+Completed 1000 requests
+Finished 1000 requests
+
+
+Server Software:        cloudflare
+Server Hostname:        researchviewer.org
+Server Port:            443
+SSL/TLS Protocol:       TLSv1.2,ECDHE-ECDSA-CHACHA20-POLY1305,256,256
+Server Temp Key:        ECDH X25519 253 bits
+TLS Server Name:        researchviewer.org
+
+Document Path:          /api/health
+Document Length:        114 bytes
+
+Concurrency Level:      10
+Time taken for tests:   39.284 seconds
+Complete requests:      1000
+Failed requests:        0
+Total transferred:      685032 bytes
+HTML transferred:       114000 bytes
+Requests per second:    25.46 [#/sec] (mean)
+Time per request:       392.839 [ms] (mean)
+Time per request:       39.284 [ms] (mean, across all concurrent requests)
+Transfer rate:          17.03 [Kbytes/sec] received
+
+Connection Times (ms)
+              min  mean[+/-sd] median   max
+Connect:       54  262 204.8    202    1526
+Processing:    44  125  82.7    108    1166
+Waiting:       44  124  82.4    107    1165
+Total:        132  387 216.0    325    1950
+
+Percentage of the requests served within a certain time (ms)
+  50%    325
+  66%    386
+  75%    436
+  80%    476
+  90%    573
+  95%    757
+  98%   1195
+  99%   1416
+ 100%   1950 (longest request)
+❯  ab -n 1000 -c 10 https://researchviewer.org/api/health
+This is ApacheBench, Version 2.3 <$Revision: 1913912 $>
+Copyright 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/
+Licensed to The Apache Software Foundation, http://www.apache.org/
+
+Benchmarking researchviewer.org (be patient)
+Completed 100 requests
+Completed 200 requests
+Completed 300 requests
+Completed 400 requests
+Completed 500 requests
+Completed 600 requests
+Completed 700 requests
+Completed 800 requests
+Completed 900 requests
+Completed 1000 requests
+Finished 1000 requests
+
+
+Server Software:        cloudflare
+Server Hostname:        researchviewer.org
+Server Port:            443
+SSL/TLS Protocol:       TLSv1.2,ECDHE-ECDSA-CHACHA20-POLY1305,256,256
+Server Temp Key:        ECDH X25519 253 bits
+TLS Server Name:        researchviewer.org
+
+Document Path:          /api/health
+Document Length:        114 bytes
+
+Concurrency Level:      10
+Time taken for tests:   32.858 seconds
+Complete requests:      1000
+Failed requests:        0
+Total transferred:      685114 bytes
+HTML transferred:       114000 bytes
+Requests per second:    30.43 [#/sec] (mean)
+Time per request:       328.577 [ms] (mean)
+Time per request:       32.858 [ms] (mean, across all concurrent requests)
+Transfer rate:          20.36 [Kbytes/sec] received
+
+Connection Times (ms)
+              min  mean[+/-sd] median   max
+Connect:       62  213  87.4    200     761
+Processing:    30  110  72.5     96     567
+Waiting:       30  109  72.1     95     567
+Total:        110  323 131.3    301     965
+
+Percentage of the requests served within a certain time (ms)
+  50%    301
+  66%    358
+  75%    390
+  80%    415
+  90%    481
+  95%    523
+  98%    683
+  99%    917
+ 100%    965 (longest request)
+
+Profiling on server:
+(.venv) shay@5009:~/dev/ResearchViewer$ ab -n 1000 -c 10 http://localhost:80/api/health
+This is ApacheBench, Version 2.3 <$Revision: 1903618 $>
+Copyright 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/
+Licensed to The Apache Software Foundation, http://www.apache.org/
+
+Benchmarking localhost (be patient)
+Completed 100 requests
+Completed 200 requests
+Completed 300 requests
+Completed 400 requests
+Completed 500 requests
+Completed 600 requests
+Completed 700 requests
+Completed 800 requests
+Completed 900 requests
+Completed 1000 requests
+Finished 1000 requests
+
+
+Server Software:        gunicorn
+Server Hostname:        localhost
+Server Port:            80
+
+Document Path:          /api/health
+Document Length:        114 bytes
+
+Concurrency Level:      10
+Time taken for tests:   21.607 seconds
+Complete requests:      1000
+Failed requests:        0
+Total transferred:      292000 bytes
+HTML transferred:       114000 bytes
+Requests per second:    46.28 [#/sec] (mean)
+Time per request:       216.074 [ms] (mean)
+Time per request:       21.607 [ms] (mean, across all concurrent requests)
+Transfer rate:          13.20 [Kbytes/sec] received
+
+Connection Times (ms)
+              min  mean[+/-sd] median   max
+Connect:        0    0   0.0      0       1
+Processing:    22  215  15.4    213     245
+Waiting:       21  214  15.4    212     244
+Total:         22  215  15.4    213     245
+
+Percentage of the requests served within a certain time (ms)
+  50%    213
+  66%    215
+  75%    216
+  80%    218
+  90%    224
+  95%    241
+  98%    243
+  99%    243
+ 100%    245 (longest request)
+(.venv) shay@5009:~/dev/ResearchViewer$ ab -n 1000 -c 10 http://localhost:80/api/health
+This is ApacheBench, Version 2.3 <$Revision: 1903618 $>
+Copyright 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/
+Licensed to The Apache Software Foundation, http://www.apache.org/
+
+Benchmarking localhost (be patient)
+Completed 100 requests
+Completed 200 requests
+Completed 300 requests
+Completed 400 requests
+Completed 500 requests
+Completed 600 requests
+Completed 700 requests
+Completed 800 requests
+Completed 900 requests
+Completed 1000 requests
+Finished 1000 requests
+
+
+Server Software:        gunicorn
+Server Hostname:        localhost
+Server Port:            80
+
+Document Path:          /api/health
+Document Length:        114 bytes
+
+Concurrency Level:      10
+Time taken for tests:   1.631 seconds
+Complete requests:      1000
+Failed requests:        0
+Total transferred:      292000 bytes
+HTML transferred:       114000 bytes
+Requests per second:    613.23 [#/sec] (mean)
+Time per request:       16.307 [ms] (mean)
+Time per request:       1.631 [ms] (mean, across all concurrent requests)
+Transfer rate:          174.87 [Kbytes/sec] received
+
+Connection Times (ms)
+              min  mean[+/-sd] median   max
+Connect:        0    0   0.0      0       0
+Processing:     7   16   7.6     14      67
+Waiting:        5   13   7.4     12      66
+Total:          7   16   7.6     14      67
+
+Percentage of the requests served within a certain time (ms)
+  50%     14
+  66%     16
+  75%     16
+  80%     17
+  90%     19
+  95%     34
+  98%     44
+  99%     51
+ 100%     67 (longest request)
