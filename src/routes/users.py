@@ -795,41 +795,65 @@ def delete_publication(user_id, pub_id):
 @users_bp.route("/api/users/<int:user_id>/recommendations", methods=["GET"])
 @cache.cached(timeout=600, query_string=True)
 def get_recommendations(user_id):
-    """Get recommended papers based on reading history and topics."""
+    """Get recommended papers based on reading history and topics with temporal weighting."""
     user_db = get_user_db()
     data_db = get_data_db()
 
     limit = int(request.args.get('limit', 10))
     strategy = request.args.get('strategy', 'hybrid')
 
-    # Get user's read papers from user DB
+    # Get user's read papers with timestamps from user DB
     read_papers = user_db.execute(
-        "SELECT paper_id FROM user_read_history WHERE user_id = ?",
+        "SELECT paper_id, read_at FROM user_read_history WHERE user_id = ? ORDER BY read_at DESC",
         [user_id]
     ).fetchdf()
 
     if read_papers.empty:
         return jsonify({"recommendations": [], "count": 0})
 
+    # Calculate temporal weights (recent reads weighted more heavily)
+    import datetime as dt
+    now = dt.datetime.now()
+    read_papers['days_ago'] = read_papers['read_at'].apply(
+        lambda x: (now - x).days if isinstance(x, dt.datetime) else 365
+    )
+
+    # Exponential decay: papers read in last 30 days get 2x weight, 60 days get 1.5x, etc.
+    read_papers['weight'] = read_papers['days_ago'].apply(
+        lambda days: max(0.5, 2.0 * (0.5 ** (days / 30)))
+    )
+
     read_paper_ids = read_papers['paper_id'].tolist()
     placeholders = ','.join(['?'] * len(read_paper_ids))
+
+    # Create weighted lookup for papers (for citation scoring)
+    paper_weights = dict(zip(read_papers['paper_id'], read_papers['weight']))
 
     recommendations = []
 
     if strategy in ['citation_graph', 'hybrid']:
         # Papers that cite papers user has read (query data DB)
-        # Optimized: Use list_has_any instead of UNNEST for better performance
         citing_papers = data_db.execute(f"""
-            SELECT DISTINCT p.id, p.title, p.citation_count, p.categories, p.update_date
+            SELECT p.id, p.title, p.citation_count, p.categories, p.update_date, p.citations
             FROM papers p
             WHERE p.id NOT IN ({placeholders})
             AND list_has_any(p.citations, CAST([{placeholders}] AS VARCHAR[]))
             AND (p.deleted = false OR p.deleted IS NULL)
-            ORDER BY p.citation_count DESC
-            LIMIT ?
-        """, read_paper_ids + read_paper_ids + [limit]).fetchdf()
+            LIMIT {limit * 3}
+        """, read_paper_ids + read_paper_ids).fetchdf()
 
         for _, paper in citing_papers.iterrows():
+            # Calculate temporal score: how many recently-read papers does this cite?
+            cited_papers = paper['citations'] if paper['citations'] else []
+            citation_weight = sum(
+                paper_weights.get(cited_id, 0)
+                for cited_id in cited_papers
+                if cited_id in paper_weights
+            )
+
+            # Base score 0.9, boosted by temporal weight (can go up to ~1.8 for highly relevant recent citations)
+            temporal_score = 0.9 + (citation_weight * 0.1)
+
             recommendations.append({
                 'id': paper['id'],
                 'title': paper['title'],
@@ -837,49 +861,63 @@ def get_recommendations(user_id):
                 'categories': paper['categories'],
                 'update_date': paper['update_date'],
                 'reason': 'Cites papers in your reading history',
-                'score': 0.9
+                'score': temporal_score
             })
 
-    if strategy in ['topic_similarity', 'hybrid'] and len(recommendations) < limit:
-        # Papers sharing microtopics with read papers (query data DB)
-        # Optimized: Materialize microtopics first, then join
-        # Get microtopics from read papers
+    if strategy in ['topic_similarity', 'hybrid'] and len(recommendations) < limit * 2:
+        # Get microtopics with temporal weighting
         user_microtopics = data_db.execute(f"""
-            SELECT DISTINCT microtopic_id
-            FROM paper_microtopics
-            WHERE paper_id IN ({placeholders})
+            SELECT pm.microtopic_id, pm.paper_id
+            FROM paper_microtopics pm
+            WHERE pm.paper_id IN ({placeholders})
         """, read_paper_ids).fetchdf()
 
         if not user_microtopics.empty:
-            microtopic_ids = user_microtopics['microtopic_id'].tolist()
+            # Calculate weight for each microtopic based on recency of papers that have it
+            user_microtopics['weight'] = user_microtopics['paper_id'].map(paper_weights)
+            microtopic_weights = user_microtopics.groupby('microtopic_id')['weight'].sum().to_dict()
+
+            microtopic_ids = list(microtopic_weights.keys())
             topic_placeholders = ','.join(['?'] * len(microtopic_ids))
 
             similar_papers = data_db.execute(f"""
-                SELECT DISTINCT p.id, p.title, p.citation_count, p.categories, p.update_date
+                SELECT p.id, p.title, p.citation_count, p.categories, p.update_date,
+                       pm.microtopic_id
                 FROM papers p
                 INNER JOIN paper_microtopics pm ON p.id = pm.paper_id
                 WHERE pm.microtopic_id IN ({topic_placeholders})
                 AND p.id NOT IN ({placeholders})
                 AND (p.deleted = false OR p.deleted IS NULL)
-                ORDER BY p.citation_count DESC
-                LIMIT ?
-            """, microtopic_ids + read_paper_ids + [limit - len(recommendations)]).fetchdf()
-        else:
-            # No microtopics found, return empty dataframe
-            import pandas as pd
-            similar_papers = pd.DataFrame(columns=['id', 'title', 'citation_count', 'categories', 'update_date'])
+                LIMIT {limit * 3}
+            """, microtopic_ids + read_paper_ids).fetchdf()
 
-        for _, paper in similar_papers.iterrows():
-            if paper['id'] not in [r['id'] for r in recommendations]:
-                recommendations.append({
-                    'id': paper['id'],
-                    'title': paper['title'],
-                    'citation_count': int(paper['citation_count']),
-                    'categories': paper['categories'],
-                    'update_date': paper['update_date'],
-                    'reason': 'Shares topics with your reading history',
-                    'score': 0.7
-                })
+            # Group by paper and calculate topic overlap weight
+            for paper_id in similar_papers['id'].unique():
+                paper_rows = similar_papers[similar_papers['id'] == paper_id]
+                paper_data = paper_rows.iloc[0]
+
+                # Sum weights of all shared microtopics
+                topic_weight = sum(
+                    microtopic_weights.get(mid, 0)
+                    for mid in paper_rows['microtopic_id'].values
+                )
+
+                # Base score 0.7, boosted by topic weight (niche recent topics get higher scores)
+                temporal_score = 0.7 + (topic_weight * 0.05)
+
+                if paper_id not in [r['id'] for r in recommendations]:
+                    recommendations.append({
+                        'id': paper_data['id'],
+                        'title': paper_data['title'],
+                        'citation_count': int(paper_data['citation_count']),
+                        'categories': paper_data['categories'],
+                        'update_date': paper_data['update_date'],
+                        'reason': 'Shares topics with your reading history',
+                        'score': temporal_score
+                    })
+
+    # Sort by score (descending), then by citation count
+    recommendations.sort(key=lambda x: (x['score'], x['citation_count']), reverse=True)
 
     return jsonify({
         "recommendations": recommendations[:limit],
