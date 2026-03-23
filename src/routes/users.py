@@ -246,18 +246,57 @@ def get_user(user_id):
     else:
         user_data['reading_by_microtopic'] = []
 
-    # Reading over time from user DB
-    reading_over_time = user_db.execute("""
+    # Reading over time from user DB - dynamic bucketing based on date range
+    # First, get the date range
+    date_range = user_db.execute("""
         SELECT
-            strftime(read_at, '%Y-%m') as month,
-            COUNT(*) as count
+            MIN(read_at) as min_date,
+            MAX(read_at) as max_date,
+            DATE_DIFF('day', MIN(read_at), MAX(read_at)) as days_range
         FROM user_read_history
         WHERE user_id = ?
-        GROUP BY month
-        ORDER BY month
-    """, [user_id]).fetchdf()
+    """, [user_id]).fetchone()
 
-    user_data['reading_over_time'] = df_to_json_serializable(reading_over_time) if not reading_over_time.empty else []
+    reading_over_time = None
+    if date_range and date_range[2] is not None:
+        days_range = date_range[2]
+
+        # Choose bucketing strategy based on range
+        if days_range <= 30:
+            # Daily buckets for <= 30 days
+            reading_over_time = user_db.execute("""
+                SELECT
+                    CAST(read_at AS DATE) as period,
+                    COUNT(*) as count
+                FROM user_read_history
+                WHERE user_id = ?
+                GROUP BY period
+                ORDER BY period
+            """, [user_id]).fetchdf()
+        elif days_range <= 180:
+            # Weekly buckets for 30-180 days (6 months)
+            reading_over_time = user_db.execute("""
+                SELECT
+                    DATE_TRUNC('week', read_at) as period,
+                    COUNT(*) as count
+                FROM user_read_history
+                WHERE user_id = ?
+                GROUP BY period
+                ORDER BY period
+            """, [user_id]).fetchdf()
+        else:
+            # Monthly buckets for > 180 days
+            reading_over_time = user_db.execute("""
+                SELECT
+                    DATE_TRUNC('month', read_at) as period,
+                    COUNT(*) as count
+                FROM user_read_history
+                WHERE user_id = ?
+                GROUP BY period
+                ORDER BY period
+            """, [user_id]).fetchdf()
+
+    user_data['reading_over_time'] = df_to_json_serializable(reading_over_time) if reading_over_time is not None and not reading_over_time.empty else []
 
     return jsonify(user_data)
 
