@@ -191,7 +191,7 @@ export default function App() {
             <div className="absolute -left-3 top-0 bottom-0 w-6 flex items-center justify-center z-50 group">
               <div
                 onMouseDown={handleLeftResizeStart}
-                className="px-1 py-2 bg-white border border-gray-300 rounded flex items-center gap-0.5 cursor-col-resize group-hover:opacity-100 hover:bg-gray-50 transition-opacity shadow-sm"
+                className="px-1 py-2 bg-white border border-gray-300 rounded flex items-center gap-0.5 cursor-col-resize opacity-0 group-hover:opacity-100 hover:bg-gray-50 transition-opacity shadow-sm"
               >
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
@@ -247,7 +247,7 @@ export default function App() {
             <div className="absolute -left-3 top-0 bottom-0 w-6 flex items-center justify-center z-50 group">
               <div
                 onMouseDown={handleResizeStart}
-                className="px-1 py-2 bg-white border border-gray-300 rounded flex items-center gap-0.5 cursor-col-resize group-hover:opacity-100 hover:bg-gray-50 transition-opacity shadow-sm"
+                className="px-1 py-2 bg-white border border-gray-300 rounded flex items-center gap-0.5 cursor-col-resize opacity-0 group-hover:opacity-100 hover:bg-gray-50 transition-opacity shadow-sm"
               >
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
                 <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
