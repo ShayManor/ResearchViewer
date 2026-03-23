@@ -65,17 +65,24 @@ export function AboutPanel({ onClose }: Props) {
                 <Github size={16} className="text-gray-400" />
                 <h3 className="text-sm font-semibold text-gray-700">Open Source</h3>
               </div>
-              <p className="text-sm text-gray-600 leading-relaxed">
-                Built with React, Flask, and DuckDB. The codebase is available for exploration and contributions.
+              <p className="text-sm text-gray-600 leading-relaxed mb-2">
+                Built with React, Flask, and DuckDB. The codebase is open for pull requests and contributions.
               </p>
+              <a
+                href="https://github.com/ShayManor/ResearchViewer"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium"
+              >
+                <Github size={14} />
+                <span>View on GitHub</span>
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
             </div>
           </div>
 
-          <div className="px-6 py-4 bg-gray-50 border-t border-gray-100">
-            <p className="text-xs text-gray-400 text-center">
-              Press <kbd className="px-1.5 py-0.5 bg-white border border-gray-200 rounded text-gray-600 font-mono">ESC</kbd> to close
-            </p>
-          </div>
         </div>
       </div>
     </div>

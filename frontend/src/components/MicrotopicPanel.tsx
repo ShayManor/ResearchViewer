@@ -31,6 +31,14 @@ export function MicrotopicPanel({ microtopicId, allNodes, onClose, readingListId
       .catch(() => {}).finally(() => setLoading(false));
   }, [microtopicId, onCompareModeChange]);
 
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
   const loadMore = () => {
     const next = papersPage + 1;
     api.getMicrotopicPapers(microtopicId, { page: next, per_page: 20, sort_by: 'citation_count' })

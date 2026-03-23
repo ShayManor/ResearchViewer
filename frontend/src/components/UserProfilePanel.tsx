@@ -27,6 +27,14 @@ export function UserProfilePanel({ userId, onClose }: Props) {
       .catch(() => {}).finally(() => setLoading(false));
   }, [userId]);
 
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
   // Organize reading data by domain -> topic -> microtopics
   const readingByDomainAndTopic = useMemo(() => {
     if (!profile?.reading_by_microtopic) return { domains: [], byDomain: {} };
