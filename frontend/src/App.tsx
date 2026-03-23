@@ -190,12 +190,12 @@ export default function App() {
             {/* Resize handle - right edge */}
             <div
               onMouseDown={handleLeftResizeStart}
-              className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/50 transition-colors z-10 group-hover:bg-gray-300/50"
+              className="absolute right-0 top-1/2 -translate-y-1/2 -mr-2 z-10 cursor-col-resize"
             >
-              <div className="absolute right-1/2 top-1/2 -translate-y-1/2 translate-x-1/2 w-1.5 h-12 flex flex-col items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <div className="w-1 h-1 bg-gray-500 rounded-full" />
-                <div className="w-1 h-1 bg-gray-500 rounded-full" />
-                <div className="w-1 h-1 bg-gray-500 rounded-full" />
+              <div className="px-1 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded flex items-center gap-0.5 transition-colors">
+                <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
+                <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
+                <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
               </div>
             </div>
 
@@ -244,12 +244,12 @@ export default function App() {
             {/* Resize handle */}
             <div
               onMouseDown={handleResizeStart}
-              className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/50 transition-colors z-10 group-hover:bg-gray-300/50"
+              className="absolute left-0 top-1/2 -translate-y-1/2 -ml-2 z-10 cursor-col-resize"
             >
-              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-12 flex flex-col items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <div className="w-1 h-1 bg-gray-500 rounded-full" />
-                <div className="w-1 h-1 bg-gray-500 rounded-full" />
-                <div className="w-1 h-1 bg-gray-500 rounded-full" />
+              <div className="px-1 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded flex items-center gap-0.5 transition-colors">
+                <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
+                <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
+                <div className="w-0.5 h-4 bg-gray-400 rounded-full" />
               </div>
             </div>
 
