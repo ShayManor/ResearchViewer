@@ -81,8 +81,8 @@ created_at,TIMESTAMP,YES,,CURRENT_TIMESTAMP,
 
 
 TODO:
-1) Make sure everything works on frontend
-2) Redis
+1) Redis
+2) Deploy on vercel
 3) Login page with username + password
 4) Google login + firebase
 5) Video

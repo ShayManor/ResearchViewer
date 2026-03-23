@@ -21,4 +21,4 @@ ENV DATABASE_PATH=/data/data.db
 EXPOSE 8080
 VOLUME /data
 
-CMD ["gunicorn", "-k", "gthread", "--workers", "1", "--threads", "1", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "--capture-output", "-b", "0.0.0.0:8080", "src.main:app"]
+CMD ["gunicorn", "-k", "gthread", "--workers", "1", "--threads", "8", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "--capture-output", "-b", "0.0.0.0:8080", "src.main:app"]
