@@ -102,7 +102,7 @@ def create_test_database():
         )
     """)
 
-    # Create users table
+    # Create users table with Firebase authentication support
     conn.execute("""
         CREATE TABLE users (
             id INTEGER PRIMARY KEY,
@@ -111,9 +111,16 @@ def create_test_database():
             password_hash VARCHAR NOT NULL,
             linked_author_id VARCHAR,
             focus_topics VARCHAR[],
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            firebase_uid VARCHAR
         )
     """)
+
+    # Create sequence for user IDs
+    conn.execute("CREATE SEQUENCE users_id_seq START 1")
+
+    # Create sequence for user publications
+    conn.execute("CREATE SEQUENCE user_publications_id_seq START 1")
 
     # Create user_reading_list table
     conn.execute("""
