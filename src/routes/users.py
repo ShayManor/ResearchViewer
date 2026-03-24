@@ -50,19 +50,54 @@ def register():
     if not firebase_uid or not email or not username:
         return jsonify({"error": "Missing required fields (firebase_uid, email, username)"}), 400
 
-    # Check if user already exists
-    existing = db.execute(
-        "SELECT id FROM users WHERE firebase_uid = ? OR email = ? OR username = ?",
-        [firebase_uid, email, username]
+    # Check if user with this firebase_uid already exists
+    existing_by_firebase = db.execute(
+        "SELECT id, username, email FROM users WHERE firebase_uid = ?",
+        [firebase_uid]
     ).fetchone()
 
-    if existing:
-        return jsonify({"error": "User already exists"}), 409
+    if existing_by_firebase:
+        # User already fully registered with this Firebase UID
+        return jsonify({
+            "user_id": existing_by_firebase[0],
+            "username": existing_by_firebase[1],
+            "email": existing_by_firebase[2]
+        }), 200
+
+    # Check if user with this email already exists (but different firebase_uid)
+    existing_by_email = db.execute(
+        "SELECT id, username, email, firebase_uid FROM users WHERE email = ?",
+        [email]
+    ).fetchone()
+
+    if existing_by_email:
+        # User exists with this email but different/missing firebase_uid
+        # Update their firebase_uid to link the accounts
+        db.execute(
+            "UPDATE users SET firebase_uid = ? WHERE email = ?",
+            [firebase_uid, email]
+        )
+        db.commit()
+
+        return jsonify({
+            "user_id": existing_by_email[0],
+            "username": existing_by_email[1],
+            "email": existing_by_email[2]
+        }), 200
+
+    # Check if username is taken
+    existing_username = db.execute(
+        "SELECT id FROM users WHERE username = ?",
+        [username]
+    ).fetchone()
+
+    if existing_username:
+        return jsonify({"error": "Username already taken"}), 409
 
     # Get next user ID from sequence
     next_id = db.execute("SELECT nextval('users_id_seq')").fetchone()[0]
 
-    # Create user (no password_hash needed - using Firebase auth)
+    # Create new user
     db.execute("""
         INSERT INTO users (id, username, email, firebase_uid, password_hash, focus_topics, created_at)
         VALUES (?, ?, ?, ?, '', ?, CURRENT_TIMESTAMP)
