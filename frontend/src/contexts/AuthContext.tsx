@@ -67,8 +67,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser);
       setLoading(true);
+      setUser(firebaseUser);
 
       if (firebaseUser) {
         await checkUserProfile(firebaseUser);
@@ -113,6 +113,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
+      // Get fresh token before registration
+      const token = await user.getIdToken(true);
+      localStorage.setItem('authToken', token);
+
       const data = await api.registerUser({
         firebase_uid: user.uid,
         email: user.email!,
