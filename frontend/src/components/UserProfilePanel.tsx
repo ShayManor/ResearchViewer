@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { X, BookOpen, TrendingUp, User, Link2, Unlink, Plus, FileText, BarChart3, Loader2, ChevronDown, LogOut, Trash2 } from 'lucide-react';
+import { X, BookOpen, TrendingUp, User, Link2, Unlink, Plus, FileText, BarChart3, Loader2, ChevronDown, LogOut, Trash2, Edit2, Check } from 'lucide-react';
 import { getCatColor, fmtCit } from '../lib/colors';
 import { api, type UserProfile, type Publication } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -24,6 +24,8 @@ export function UserProfilePanel({ userId, onClose }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [editingPubId, setEditingPubId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<Partial<Publication>>({});
 
   useEffect(() => {
     setLoading(true);
@@ -99,6 +101,34 @@ export function UserProfilePanel({ userId, onClose }: Props) {
   };
   const delPub = async (id: number) => {
     try { await api.deletePublication(userId, id); setPubs(p => p.filter(x => x.id !== id)); } catch {}
+  };
+  const handleEditClick = (pub: Publication) => {
+    setEditingPubId(pub.id);
+    setEditForm({
+      title: pub.title,
+      venue: pub.venue,
+      year: pub.year,
+      doi: pub.doi,
+      citation_count: pub.citation_count,
+      coauthors: pub.coauthors
+    });
+  };
+  const handleSaveEdit = async () => {
+    if (!editingPubId) return;
+    try {
+      await api.updatePublication(userId, editingPubId, editForm);
+      const p = await api.getPublications(userId);
+      setPubs(p.publications);
+      setPubCites(p.total_citations);
+      setEditingPubId(null);
+      setEditForm({});
+    } catch (err) {
+      console.error('Failed to update publication:', err);
+    }
+  };
+  const handleCancelEdit = () => {
+    setEditingPubId(null);
+    setEditForm({});
   };
 
   const handleLogout = async () => {
@@ -285,10 +315,106 @@ export function UserProfilePanel({ userId, onClose }: Props) {
               </div>
               <div><p className="text-[10px] font-semibold text-gray-400 uppercase mb-2">Your Publications</p>
                 {pubs.length > 0 ? <div className="space-y-2">{pubs.map(p => (
-                  <div key={p.id} className="group p-3 rounded-xl border border-gray-200 hover:bg-gray-50"><div className="flex items-start justify-between gap-2"><div>
-                    <p className="text-sm font-medium text-gray-700">{p.title}</p>
-                    <div className="flex items-center gap-3 mt-1 text-[10px] text-gray-400">{p.venue && <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">{p.venue}</span>}<span>{p.year}</span><span>{p.citation_count} cites</span></div>
-                  </div><button onClick={() => delPub(p.id)} className="p-1 rounded text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100"><X size={12} /></button></div></div>))}</div>
+                  <div key={p.id} className={`p-3 rounded-xl border ${editingPubId === p.id ? 'border-blue-300 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                    {editingPubId === p.id ? (
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          value={editForm.title || ''}
+                          onChange={e => setEditForm({ ...editForm, title: e.target.value })}
+                          placeholder="Title"
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none placeholder:text-gray-300"
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            value={editForm.venue || ''}
+                            onChange={e => setEditForm({ ...editForm, venue: e.target.value })}
+                            placeholder="Venue"
+                            className="px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none placeholder:text-gray-300"
+                          />
+                          <input
+                            type="number"
+                            value={editForm.year || ''}
+                            onChange={e => setEditForm({ ...editForm, year: parseInt(e.target.value) || undefined })}
+                            placeholder="Year"
+                            className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-mono focus:outline-none placeholder:text-gray-300"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            value={editForm.doi || ''}
+                            onChange={e => setEditForm({ ...editForm, doi: e.target.value })}
+                            placeholder="DOI"
+                            className="px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none placeholder:text-gray-300"
+                          />
+                          <input
+                            type="number"
+                            value={editForm.citation_count ?? ''}
+                            onChange={e => setEditForm({ ...editForm, citation_count: parseInt(e.target.value) || 0 })}
+                            placeholder="Citations"
+                            className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-mono focus:outline-none placeholder:text-gray-300"
+                          />
+                        </div>
+                        <input
+                          type="text"
+                          value={editForm.coauthors?.join(', ') || ''}
+                          onChange={e => setEditForm({ ...editForm, coauthors: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                          placeholder="Co-authors (comma-separated)"
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none placeholder:text-gray-300"
+                        />
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            onClick={handleSaveEdit}
+                            disabled={!editForm.title?.trim()}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-blue-700"
+                          >
+                            <Check size={14} /> Save
+                          </button>
+                          <button
+                            onClick={handleCancelEdit}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-100"
+                          >
+                            <X size={14} /> Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="group flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-700">{p.title}</p>
+                          <div className="flex items-center gap-3 mt-1 text-[10px] text-gray-400">
+                            {p.venue && <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">{p.venue}</span>}
+                            <span>{p.year}</span>
+                            <span>{p.citation_count} cites</span>
+                            {p.doi && <span className="font-mono">{p.doi}</span>}
+                          </div>
+                          {p.coauthors && p.coauthors.length > 0 && (
+                            <div className="flex items-center gap-1 mt-1">
+                              <span className="text-[9px] text-gray-400">Co-authors:</span>
+                              <span className="text-[9px] text-gray-500">{p.coauthors.join(', ')}</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100">
+                          <button
+                            onClick={() => handleEditClick(p)}
+                            className="p-1 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                          >
+                            <Edit2 size={12} />
+                          </button>
+                          <button
+                            onClick={() => delPub(p.id)}
+                            className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}</div>
                   : <p className="text-xs text-gray-400 italic">No publications yet</p>}
               </div>
               <div><p className="text-[10px] font-semibold text-gray-400 uppercase mb-2">Add Publication</p>

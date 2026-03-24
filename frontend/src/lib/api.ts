@@ -109,6 +109,19 @@ export const api = {
     req<{ publications: Publication[]; count: number; total_citations: number }>(`/api/users/${uid}/publications`),
   addPublication: (uid: number, data: any) =>
     req<any>(`/api/users/${uid}/publications`, { method: 'POST', body: JSON.stringify(data) }),
+  updatePublication: (uid: number, pubId: number, data: {
+    title?: string;
+    venue?: string;
+    year?: number;
+    doi?: string;
+    citation_count?: number;
+    coauthors?: string[];
+  }) =>
+    req<{ status: string }>(`/api/users/${uid}/publications/${pubId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }),
   deletePublication: (uid: number, pubId: number) =>
     req<any>(`/api/users/${uid}/publications/${pubId}`, { method: 'DELETE' }),
   getRecommendations: (uid: number, limit = 8) =>
