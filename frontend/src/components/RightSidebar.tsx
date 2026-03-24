@@ -67,17 +67,26 @@ function TB({ active, onClick, icon, label }: { active: boolean; onClick: () => 
 }
 function PC({ paper, onAction, actionIcon, highlight, reason, onMarkAsRead }: { paper: Paper; onAction: () => void; actionIcon: React.ReactNode; highlight?: boolean; reason?: string; onMarkAsRead?: () => void }) {
   const arxiv = paper.id?.match(/^\d{4}\./) ? `https://arxiv.org/abs/${paper.id}` : null;
+  const year = paper.update_date ? extractYear(paper.update_date) : null;
   return (<div className={`group p-2.5 rounded-lg border ${highlight ? 'border-amber-200 bg-amber-50/30 hover:bg-amber-50/60' : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50/50'}`}>
     <div className="flex items-start gap-1.5"><div className="flex-1 min-w-0">
       <p className="text-xs font-medium text-gray-700 leading-snug line-clamp-2">{paper.title}</p>
       <div className="flex items-center gap-1.5 mt-1">{paper.citation_count != null && <span className="text-[9px] text-gray-400">{fmtCit(paper.citation_count)}</span>}
-        {paper.update_date && <span className="text-[9px] text-gray-400">{String(paper.update_date).slice(0, 4)}</span>}</div>
+        {year && <span className="text-[9px] text-gray-400">{year}</span>}</div>
     </div>
     <div className="flex items-center gap-0.5 shrink-0">
       {arxiv && <a href={arxiv} target="_blank" rel="noopener noreferrer" className="p-1 rounded text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100"><ExternalLink size={10} /></a>}
       {onMarkAsRead && <button onClick={onMarkAsRead} className="p-1 rounded text-gray-300 hover:text-emerald-500 opacity-0 group-hover:opacity-100" title="Mark as read"><CheckCircle size={10} /></button>}
       <button onClick={onAction} className="p-1 rounded text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100">{actionIcon}</button>
     </div></div></div>);
+}
+
+function extractYear(date: string | Date): string | null {
+  // Handle different date formats: "2024-03-24", "Wed, 24 Mar 2024", Date object, etc.
+  const str = String(date);
+  // Try to extract 4-digit year from the string
+  const match = str.match(/\b(19|20)\d{2}\b/);
+  return match ? match[0] : str.slice(0, 4);
 }
 function CL() { return <div className="py-8 flex justify-center"><Loader2 size={18} className="animate-spin text-gray-400" /></div>; }
 function Em({ text, sub }: { text: string; sub: string }) { return <div className="flex flex-col items-center py-12 text-center"><p className="text-sm text-gray-400">{text}</p><p className="text-xs text-gray-300 mt-1">{sub}</p></div>; }
