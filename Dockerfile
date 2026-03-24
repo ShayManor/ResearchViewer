@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
 COPY src/ ./src/
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
+COPY static/ ./static/
 
 ENV PORT=8080
 ENV DATABASE_PATH=/data/data.db
