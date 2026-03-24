@@ -5,11 +5,6 @@ from src.database import get_data_db as get_db
 health = Blueprint("health", __name__)
 
 
-@health.route("/api/")
-def ping():
-    return jsonify({"ping": "pong"}), 200
-
-
 @health.route("/api/health")
 def health_check():
     """Health check endpoint with database connectivity test."""

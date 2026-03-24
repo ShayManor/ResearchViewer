@@ -1,0 +1,1008 @@
+openapi: 3.0.0
+info:
+  title: ResearchViewer API
+  description: REST API for exploring and analyzing arXiv research papers
+  version: 1.0.0
+  contact:
+    url: https://researchviewer.org
+
+servers:
+  - url: https://researchviewer.org
+    description: Production
+  - url: http://localhost:8080
+    description: Development
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Firebase ID token
+
+  schemas:
+    Paper:
+      type: object
+      properties:
+        id:
+          type: string
+          description: ArXiv ID
+        submitter:
+          type: string
+        authors:
+          type: string
+          description: Comma-separated author names
+        title:
+          type: string
+        comments:
+          type: string
+        journal-ref:
+          type: string
+        doi:
+          type: string
+        report-no:
+          type: string
+        categories:
+          type: string
+          description: ArXiv categories
+        license:
+          type: string
+        abstract:
+          type: string
+        versions:
+          type: array
+          items:
+            type: object
+            properties:
+              version:
+                type: string
+              created:
+                type: string
+        update_date:
+          type: string
+          format: date
+        authors_parsed:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+        author_ids:
+          type: array
+          items:
+            type: string
+        deleted:
+          type: boolean
+        citations:
+          type: array
+          items:
+            type: string
+          description: Array of paper IDs that cite this paper
+        citation_count:
+          type: integer
+        oa_work_id:
+          type: string
+          description: OpenAlex work ID
+        primary_topic_id:
+          type: string
+        primary_topic_name:
+          type: string
+        primary_topic_score:
+          type: number
+          format: double
+        primary_subfield_id:
+          type: string
+        primary_subfield_name:
+          type: string
+        primary_field_id:
+          type: string
+        primary_field_name:
+          type: string
+        primary_domain_id:
+          type: string
+        primary_domain_name:
+          type: string
+        topics_json:
+          type: string
+          description: JSON string of all topics
+        topics_fetched:
+          type: boolean
+        topics_updated_at:
+          type: string
+          format: date-time
+        microtopics:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaperMicrotopic'
+          description: Microtopics for this paper (only in single paper endpoint)
+
+    Author:
+      type: object
+      properties:
+        author_id:
+          type: string
+          description: OpenAlex author ID
+        name:
+          type: string
+        paper_dois:
+          type: array
+          items:
+            type: string
+          description: Array of paper IDs by this author
+        h_index:
+          type: integer
+        works_count:
+          type: integer
+        cited_by_count:
+          type: integer
+        top_papers:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaperSummary'
+          description: Top papers by citations (only in single author endpoint)
+        papers_by_year:
+          type: array
+          items:
+            type: object
+            properties:
+              year:
+                type: string
+              count:
+                type: integer
+          description: Publication count per year (only in single author endpoint)
+        citations_by_year:
+          type: array
+          items:
+            type: object
+            properties:
+              year:
+                type: string
+              citations:
+                type: integer
+          description: Citation count per year (only in single author endpoint)
+
+    PaperSummary:
+      type: object
+      description: Abbreviated paper info
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        citation_count:
+          type: integer
+        update_date:
+          type: string
+          format: date
+
+    Microtopic:
+      type: object
+      properties:
+        microtopic_id:
+          type: string
+        bucket_column:
+          type: string
+        bucket_value:
+          type: string
+          description: The domain/field this microtopic belongs to
+        cluster_id:
+          type: integer
+        label:
+          type: string
+          description: Human-readable microtopic label
+        size:
+          type: integer
+          description: Number of papers in this microtopic
+        top_terms:
+          type: array
+          items:
+            type: string
+          description: Representative terms (only in detail endpoint)
+        representative_titles:
+          type: array
+          items:
+            type: string
+          description: Example paper titles (only in detail endpoint)
+        embedding_backend:
+          type: string
+        cluster_model:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        stats:
+          $ref: '#/components/schemas/MicrotopicStats'
+          description: Aggregated statistics (only in detail endpoint)
+
+    MicrotopicStats:
+      type: object
+      properties:
+        total_citations:
+          type: integer
+        avg_citations:
+          type: number
+        median_citations:
+          type: number
+        max_citations:
+          type: integer
+        paper_count:
+          type: integer
+        unique_authors:
+          type: integer
+        year_range:
+          type: string
+        recent_growth_pct:
+          type: number
+
+    PaperMicrotopic:
+      type: object
+      properties:
+        microtopic_id:
+          type: string
+        label:
+          type: string
+        score:
+          type: number
+          description: Relevance score
+        is_primary:
+          type: boolean
+
+    User:
+      type: object
+      properties:
+        user_id:
+          type: integer
+        username:
+          type: string
+        email:
+          type: string
+        focus_topics:
+          type: array
+          items:
+            type: integer
+          description: Array of topic IDs user is interested in
+        linked_author_id:
+          type: string
+          description: OpenAlex author ID if user is a researcher
+        created_at:
+          type: string
+          format: date-time
+        reading_list_count:
+          type: integer
+          description: Number of papers in reading list (only in full profile)
+        total_citations:
+          type: integer
+          description: Total citations if linked to author (only in full profile)
+
+    ReadingListItem:
+      type: object
+      properties:
+        paper_id:
+          type: string
+        added_at:
+          type: string
+          format: date-time
+        paper:
+          $ref: '#/components/schemas/Paper'
+          description: Full paper details
+
+    GraphNode:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        size:
+          type: integer
+        bucket_value:
+          type: string
+
+    GraphEdge:
+      type: object
+      properties:
+        source:
+          type: string
+        target:
+          type: string
+        weight:
+          type: number
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        paper_count:
+          type: integer
+        author_count:
+          type: integer
+        microtopic_count:
+          type: integer
+        database_size_mb:
+          type: number
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      description: Check API status and database statistics
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/auth/register:
+    post:
+      summary: Register new user
+      description: Create account after Firebase authentication. Call this after user completes Google OAuth.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - firebase_uid
+                - email
+                - username
+              properties:
+                firebase_uid:
+                  type: string
+                  description: Firebase UID from Google OAuth
+                email:
+                  type: string
+                  format: email
+                username:
+                  type: string
+                focus_topics:
+                  type: array
+                  items:
+                    type: integer
+                  description: Initial topic interests (optional)
+      responses:
+        '200':
+          description: User already registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: integer
+                  username:
+                    type: string
+                  email:
+                    type: string
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: integer
+                  username:
+                    type: string
+                  email:
+                    type: string
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Username already taken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/auth/me:
+    get:
+      summary: Get current user
+      description: Get authenticated user profile with statistics
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/papers:
+    get:
+      summary: Search papers
+      description: Search and filter papers with pagination
+      parameters:
+        - name: keyword
+          in: query
+          schema:
+            type: string
+        - name: subject
+          in: query
+          schema:
+            type: string
+        - name: author
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [citation_count, update_date, title]
+      responses:
+        '200':
+          description: Papers found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  papers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Paper'
+                  total:
+                    type: integer
+
+  /api/papers/{id}:
+    get:
+      summary: Get paper details
+      description: Get full paper details including microtopics
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: ArXiv ID or DOI
+      responses:
+        '200':
+          description: Paper details with microtopics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paper'
+        '404':
+          description: Paper not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/authors/search:
+    get:
+      summary: Search authors
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Authors found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authors:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Author'
+
+  /api/authors/{author_id}:
+    get:
+      summary: Get author details
+      description: Get full author profile with top papers and publication history
+      parameters:
+        - name: author_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: OpenAlex author ID
+      responses:
+        '200':
+          description: Author details with statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Author'
+        '404':
+          description: Author not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/microtopics:
+    get:
+      summary: List microtopics
+      description: Search and filter microtopics with pagination
+      parameters:
+        - name: bucket_value
+          in: query
+          schema:
+            type: string
+          description: Filter by domain/field
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Search microtopic labels
+        - name: min_size
+          in: query
+          schema:
+            type: integer
+          description: Minimum number of papers
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [size, label, created_at]
+            default: size
+        - name: sort_order
+          in: query
+          schema:
+            type: string
+            enum: [ASC, DESC]
+            default: DESC
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+      responses:
+        '200':
+          description: Microtopics list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  microtopics:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Microtopic'
+                  count:
+                    type: integer
+
+  /api/microtopics/{id}:
+    get:
+      summary: Get microtopic details
+      description: Get full microtopic with statistics, top terms, and representative papers
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Microtopic ID
+      responses:
+        '200':
+          description: Microtopic details with statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Microtopic'
+        '404':
+          description: Microtopic not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/microtopics/graph:
+    get:
+      summary: Get microtopic network graph
+      description: Get nodes and edges for visualizing microtopic relationships
+      parameters:
+        - name: bucket_value
+          in: query
+          schema:
+            type: string
+          description: Filter by domain/field
+        - name: min_size
+          in: query
+          schema:
+            type: integer
+          description: Minimum papers per microtopic
+        - name: limit
+          in: query
+          schema:
+            type: integer
+          description: Maximum number of nodes
+      responses:
+        '200':
+          description: Graph data with nodes and edges
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GraphNode'
+                  edges:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GraphEdge'
+
+  /api/analytics/domains:
+    get:
+      summary: Get research domains
+      description: List all research domains with paper counts
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 500
+      responses:
+        '200':
+          description: Research domains with statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  domains:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        domain:
+                          type: string
+                        paper_count:
+                          type: integer
+                  count:
+                    type: integer
+
+  /api/analytics/topics:
+    get:
+      summary: Get topics in domain
+      description: List all topics within a specific research domain
+      parameters:
+        - name: domain
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Domain name
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 500
+      responses:
+        '200':
+          description: Topics in domain with paper counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  topics:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        topic:
+                          type: string
+                        paper_count:
+                          type: integer
+                  count:
+                    type: integer
+        '400':
+          description: Domain parameter required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/analytics/velocity:
+    get:
+      summary: Paper submission velocity
+      description: Get paper submission trends over time
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [week, month]
+            default: month
+          description: Time period for aggregation
+        - name: lookback
+          in: query
+          schema:
+            type: integer
+            default: 12
+          description: Number of periods to look back
+      responses:
+        '200':
+          description: Submission velocity time series
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  velocity:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        period:
+                          type: string
+                        count:
+                          type: integer
+                  period:
+                    type: string
+
+  /api/analytics/hot-papers:
+    get:
+      summary: Get trending papers
+      description: Get papers gaining citations rapidly (personalized if user_id provided)
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 50
+        - name: user_id
+          in: query
+          schema:
+            type: integer
+          description: User ID for personalization (optional)
+      responses:
+        '200':
+          description: Trending papers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hot_papers:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/Paper'
+                        - type: object
+                          properties:
+                            velocity_score:
+                              type: number
+                              description: Trending score
+                  count:
+                    type: integer
+
+  /api/users/{user_id}:
+    get:
+      summary: Get user profile
+      description: Get full user profile with statistics (must be authenticated as this user)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User profile with statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - can only access own profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/users/{user_id}/reading-list:
+    get:
+      summary: Get reading list
+      description: Get user's saved papers with full details
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Reading list with paper details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reading_list:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReadingListItem'
+                  count:
+                    type: integer
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      summary: Add to reading list
+      description: Save a paper to user's reading list
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - paper_id
+              properties:
+                paper_id:
+                  type: string
+                  description: ArXiv ID or DOI
+      responses:
+        '201':
+          description: Paper added to reading list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  paper_id:
+                    type: string
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Paper already in reading list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/users/{user_id}/recommendations:
+    get:
+      summary: Get personalized recommendations
+      description: Get paper recommendations based on user's reading history and interests
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 8
+            maximum: 50
+        - name: strategy
+          in: query
+          schema:
+            type: string
+            enum: [hybrid, citations, topics]
+            default: hybrid
+          description: Recommendation strategy
+      responses:
+        '200':
+          description: Personalized paper recommendations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recommendations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Paper'
+                  count:
+                    type: integer
+                  strategy:
+                    type: string
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
