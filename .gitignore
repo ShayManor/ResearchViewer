@@ -12,5 +12,11 @@ venv/
 *.egg-info/
 .DS_Store
 
+firebase-service-account.json
+
+.env
+frontend/.env
+frontend/.env.local
+
 # Allow test database (it's small and needed for CI)
 !tests/test_data.db

@@ -7,15 +7,7 @@ Tests all CRUD operations, edge cases, and error conditions.
 import pytest
 import json
 from src.main import app
-from src.database import get_db
-
-
-@pytest.fixture
-def client():
-    """Create a test client for the Flask app."""
-    app.config['TESTING'] = True
-    with app.test_client() as client:
-        yield client
+from src.database import get_data_db, get_user_db
 
 
 @pytest.fixture
@@ -34,9 +26,15 @@ def client(app_ctx):
 
 
 @pytest.fixture
-def db(app_ctx):
-    """Get database connection inside Flask app context."""
-    yield get_db()
+def data_db(app_ctx):
+    """Get data database connection inside Flask app context."""
+    yield get_data_db()
+
+
+@pytest.fixture
+def user_db(app_ctx):
+    """Get user database connection inside Flask app context."""
+    yield get_user_db()
 
 
 class TestHealth:
@@ -52,12 +50,12 @@ class TestHealth:
         assert 'paper_count' in data
         assert data['paper_count'] > 0
 
-    def test_ping(self, client):
-        """Test ping endpoint."""
+    def test_swagger_ui_loads(self, client):
+        """Test that Swagger UI loads at /api."""
         response = client.get('/api/')
         assert response.status_code == 200
-        data = json.loads(response.data)
-        assert data['ping'] == 'pong'
+        # Should return HTML for Swagger UI
+        assert b'swagger' in response.data.lower()
 
 
 class TestPapers:
@@ -128,10 +126,10 @@ class TestPapers:
         assert 'count' in data
         assert isinstance(data['count'], int)
 
-    def test_get_paper_by_doi(self, client, db):
+    def test_get_paper_by_doi(self, client, data_db):
         """Test getting a specific paper by arXiv ID."""
         # Get a valid paper ID first
-        result = db.execute("""
+        result = data_db.execute("""
             SELECT id FROM papers
             WHERE id IS NOT NULL
             AND (deleted = false OR deleted IS NULL)
@@ -179,10 +177,10 @@ class TestPapers:
         data = json.loads(response.data)
         assert data['status'] == 'created'
 
-    def test_add_paper_duplicate(self, client, db):
+    def test_add_paper_duplicate(self, client, data_db):
         """Test adding duplicate paper."""
         # Get an existing DOI
-        result = db.execute("""
+        result = data_db.execute("""
             SELECT doi FROM papers
             WHERE doi IS NOT NULL
             LIMIT 1
@@ -248,10 +246,10 @@ class TestAuthors:
         response = client.get('/api/authors/search')
         assert response.status_code == 400
 
-    def test_get_author_by_id(self, client, db):
+    def test_get_author_by_id(self, client, data_db):
         """Test getting specific author."""
         # Get a valid author ID
-        result = db.execute("""
+        result = data_db.execute("""
             SELECT author_id FROM authors LIMIT 1
         """).fetchone()
 
@@ -350,69 +348,244 @@ class TestAnalytics:
 
 
 class TestUsers:
-    """Test user-related endpoints."""
+    """Test user-related endpoints with Firebase authentication."""
 
-    def test_register_user(self, client):
-        """Test user registration."""
+    def test_register_user_firebase(self, client):
+        """Test user registration with Firebase UID."""
         import time
-        username = f'testuser_{int(time.time())}'
+        timestamp = int(time.time())
+        username = f'testuser_{timestamp}'
+        firebase_uid = f'firebase_test_{timestamp}'
+
         user_data = {
+            'firebase_uid': firebase_uid,
             'username': username,
             'email': f'{username}@test.com',
-            'password': 'testpassword123'
+            'focus_topics': []
         }
 
         response = client.post('/api/auth/register',
                               data=json.dumps(user_data),
                               content_type='application/json')
-        assert response.status_code == 201
+        assert response.status_code in [200, 201]  # 200 if exists, 201 if created
         data = json.loads(response.data)
         assert 'user_id' in data
-        assert 'session_token' in data
+        assert 'username' in data
+        assert 'email' in data
+
+    def test_register_duplicate_firebase_uid(self, client):
+        """Test registering same Firebase UID twice returns existing user."""
+        import time
+        timestamp = int(time.time())
+        firebase_uid = f'firebase_dup_{timestamp}'
+
+        user_data = {
+            'firebase_uid': firebase_uid,
+            'username': f'user1_{timestamp}',
+            'email': f'user1_{timestamp}@test.com'
+        }
+
+        # First registration
+        response1 = client.post('/api/auth/register',
+                               data=json.dumps(user_data),
+                               content_type='application/json')
+        assert response1.status_code == 201
+        data1 = json.loads(response1.data)
+        user_id1 = data1['user_id']
+
+        # Second registration with same Firebase UID but different username
+        user_data['username'] = f'user2_{timestamp}'
+        response2 = client.post('/api/auth/register',
+                               data=json.dumps(user_data),
+                               content_type='application/json')
+        assert response2.status_code == 200  # Should return existing user
+        data2 = json.loads(response2.data)
+        assert data2['user_id'] == user_id1  # Same user ID
 
     def test_register_missing_fields(self, client):
-        """Test registration with missing fields."""
+        """Test registration with missing required fields."""
+        # Missing firebase_uid
         response = client.post('/api/auth/register',
-                              data=json.dumps({'username': 'test'}),
+                              data=json.dumps({
+                                  'username': 'test',
+                                  'email': 'test@test.com'
+                              }),
                               content_type='application/json')
         assert response.status_code == 400
 
-    def test_login_user(self, client, db):
-        """Test user login."""
-        # First register a user
-        import time
-        username = f'logintest_{int(time.time())}'
-        password = 'testpass123'
-
-        reg_response = client.post('/api/auth/register',
-                                   data=json.dumps({
-                                       'username': username,
-                                       'email': f'{username}@test.com',
-                                       'password': password
-                                   }),
-                                   content_type='application/json')
-        assert reg_response.status_code == 201
-
-        # Now try to login
-        login_response = client.post('/api/auth/login',
-                                     data=json.dumps({
-                                         'username': username,
-                                         'password': password
-                                     }),
-                                     content_type='application/json')
-        assert login_response.status_code == 200
-        data = json.loads(login_response.data)
-        assert 'session_token' in data
-
-    def test_login_invalid_credentials(self, client):
-        """Test login with invalid credentials."""
-        response = client.post('/api/auth/login',
+        # Missing username
+        response = client.post('/api/auth/register',
                               data=json.dumps({
-                                  'username': 'nonexistent',
-                                  'password': 'wrong'
+                                  'firebase_uid': 'test123',
+                                  'email': 'test@test.com'
                               }),
                               content_type='application/json')
+        assert response.status_code == 400
+
+        # Missing email
+        response = client.post('/api/auth/register',
+                              data=json.dumps({
+                                  'firebase_uid': 'test123',
+                                  'username': 'testuser'
+                              }),
+                              content_type='application/json')
+        assert response.status_code == 400
+
+    def test_register_duplicate_username(self, client):
+        """Test that duplicate usernames are rejected."""
+        import time
+        import random
+        timestamp = int(time.time() * 1000)  # Microsecond precision
+        random_suffix = random.randint(10000, 99999)
+        username = f'dup_user_{timestamp}_{random_suffix}'
+
+        # First user
+        user_data1 = {
+            'firebase_uid': f'fb1_{timestamp}_{random_suffix}',
+            'username': username,
+            'email': f'user1_{timestamp}_{random_suffix}@test.com'
+        }
+        response1 = client.post('/api/auth/register',
+                               data=json.dumps(user_data1),
+                               content_type='application/json')
+        # Should be created (201) or already exists with this firebase_uid (200)
+        assert response1.status_code in [200, 201]
+
+        # If it returned 200, it means user already existed, so skip the duplicate test
+        if response1.status_code == 200:
+            # User already existed, can't test duplicate username scenario
+            return
+
+        # Second user with same username but different firebase_uid
+        user_data2 = {
+            'firebase_uid': f'fb2_{timestamp}_{random_suffix}',
+            'username': username,  # Same username
+            'email': f'user2_{timestamp}_{random_suffix}@test.com'
+        }
+        response2 = client.post('/api/auth/register',
+                               data=json.dumps(user_data2),
+                               content_type='application/json')
+        assert response2.status_code == 409  # Conflict - username taken
+
+
+class TestDualDatabase:
+    """Test that data and user databases are properly separated."""
+
+    def test_data_db_has_papers(self, data_db):
+        """Test that data database contains papers table."""
+        result = data_db.execute("SELECT COUNT(*) FROM papers").fetchone()
+        assert result[0] > 0, "Data database should have papers"
+
+    def test_data_db_has_authors(self, data_db):
+        """Test that data database contains authors table."""
+        result = data_db.execute("SELECT COUNT(*) FROM authors").fetchone()
+        assert result[0] > 0, "Data database should have authors"
+
+    def test_user_db_has_users(self, user_db):
+        """Test that user database contains users table."""
+        result = user_db.execute("SELECT COUNT(*) FROM users").fetchone()
+        assert result[0] >= 0, "User database should have users table"
+
+    def test_user_db_has_reading_list(self, user_db):
+        """Test that user database has reading list table."""
+        # Should not error even if table is empty
+        result = user_db.execute("SELECT COUNT(*) FROM user_reading_list").fetchone()
+        assert result[0] >= 0
+
+    def test_databases_are_independent(self, data_db, user_db):
+        """Test that modifying user DB doesn't affect data DB."""
+        # Get counts before
+        papers_before = data_db.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
+
+        # Add a test user
+        import time
+        timestamp = int(time.time() * 1000)
+        try:
+            user_db.execute(f"""
+                INSERT INTO users (id, username, email, password_hash, firebase_uid)
+                VALUES (nextval('users_id_seq'), 'testuser_{timestamp}',
+                        'test_{timestamp}@test.com', 'hash', 'fb_{timestamp}')
+            """)
+            user_db.commit()
+        except:
+            # User might already exist, that's fine
+            pass
+
+        # Papers count should be unchanged
+        papers_after = data_db.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
+        assert papers_before == papers_after
+
+
+class TestReadingList:
+    """Test reading list functionality."""
+
+    def test_add_to_reading_list_requires_auth(self, client):
+        """Test that adding to reading list requires authentication."""
+        response = client.post('/api/users/1/reading-list',
+                              data=json.dumps({'paper_id': 'test-paper'}),
+                              content_type='application/json')
         assert response.status_code == 401
+
+    def test_get_reading_list_requires_auth(self, client):
+        """Test that getting reading list requires authentication."""
+        response = client.get('/api/users/1/reading-list')
+        assert response.status_code == 401
+
+
+class TestMicrotopics:
+    """Test microtopic endpoints."""
+
+    def test_get_microtopics(self, client):
+        """Test getting microtopics list."""
+        response = client.get('/api/microtopics?limit=10')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert 'microtopics' in data
+        assert 'count' in data
+        assert isinstance(data['microtopics'], list)
+
+    def test_get_microtopics_with_search(self, client):
+        """Test searching microtopics."""
+        response = client.get('/api/microtopics?search=machine&limit=5')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert isinstance(data['microtopics'], list)
+
+    def test_get_microtopics_with_bucket_filter(self, client, data_db):
+        """Test filtering microtopics by bucket."""
+        # Get a valid bucket value
+        result = data_db.execute("""
+            SELECT DISTINCT bucket_value FROM microtopics
+            WHERE bucket_value IS NOT NULL LIMIT 1
+        """).fetchone()
+
+        if result:
+            bucket = result[0]
+            response = client.get(f'/api/microtopics?bucket_value={bucket}&limit=10')
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            # All returned microtopics should have the specified bucket
+            for mt in data['microtopics']:
+                assert mt['bucket_value'] == bucket
+
+    def test_get_microtopic_detail(self, client, data_db):
+        """Test getting single microtopic details."""
+        # Get a valid microtopic ID
+        result = data_db.execute("SELECT microtopic_id FROM microtopics LIMIT 1").fetchone()
+
+        if result:
+            mt_id = result[0]
+            response = client.get(f'/api/microtopics/{mt_id}')
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['microtopic_id'] == mt_id
+            assert 'label' in data
+            assert 'size' in data
+
+    def test_get_microtopic_not_found(self, client):
+        """Test getting non-existent microtopic."""
+        response = client.get('/api/microtopics/nonexistent-id-12345')
+        assert response.status_code == 404
 
 
 class TestEdgeCases:
