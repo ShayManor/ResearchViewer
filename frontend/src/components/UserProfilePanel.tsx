@@ -215,9 +215,10 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                     {/* Bars */}
                     <div className="flex-1 flex items-end gap-1 h-24 border-l border-b border-gray-200">{profile.reading_over_time.map(({ month, count }, i) => {
                       const max = Math.max(...profile.reading_over_time.map(m => m.count), 1);
-                      const heightPct = (count / max) * 100;
-                      return (<div key={month} className="flex-1 flex flex-col items-center justify-end gap-0.5" title={`${month}: ${count}`}>
-                        <div className="w-full rounded-t" style={{ height: `${heightPct}%`, minHeight: count > 0 ? 4 : 2, backgroundColor: i === profile.reading_over_time.length - 1 ? '#3b82f6' : '#94a3b8' }} />
+                      const containerHeight = 96; // h-24 = 96px
+                      const heightPx = Math.max((count / max) * containerHeight, count > 0 ? 4 : 2);
+                      return (<div key={month} className="flex-1 flex flex-col items-center justify-end" title={`${month}: ${count} papers`}>
+                        <div className="w-full rounded-t" style={{ height: `${heightPx}px`, backgroundColor: i === profile.reading_over_time.length - 1 ? '#3b82f6' : '#94a3b8' }} />
                       </div>);
                     })}</div>
                   </div>
