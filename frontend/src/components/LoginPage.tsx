@@ -12,35 +12,35 @@ import { useAuth } from '../contexts/AuthContext';
 import { LogIn, Loader2 } from 'lucide-react';
 
 export function LoginPage() {
-  const { signInWithGoogle, registerUser, user, userId, loading } = useAuth();
+  const { signInWithGoogle, registerUser, user, userId, loading, needsRegistration, error: authError, retryAuth } = useAuth();
   const [username, setUsername] = useState('');
   const [registering, setRegistering] = useState(false);
-  const [error, setError] = useState('');
+  const [localError, setLocalError] = useState('');
 
   const handleGoogleSignIn = async () => {
     try {
-      setError('');
+      setLocalError('');
       await signInWithGoogle();
     } catch (err) {
       console.error('Sign in failed:', err);
-      setError('Sign in failed. Please try again.');
+      setLocalError('Sign in failed. Please try again.');
     }
   };
 
   const handleRegister = async () => {
     if (!username.trim()) {
-      setError('Please enter a username');
+      setLocalError('Please enter a username');
       return;
     }
 
     setRegistering(true);
-    setError('');
+    setLocalError('');
 
     try {
       await registerUser(username);
     } catch (err) {
       console.error('Registration failed:', err);
-      setError('Registration failed. Username may already be taken.');
+      setLocalError('Registration failed. Username may already be taken.');
     } finally {
       setRegistering(false);
     }
@@ -55,17 +55,44 @@ export function LoginPage() {
     );
   }
 
-  // User is signed in with Google but not registered in backend
-  if (user && !userId) {
+  // Show error screen with retry if there was a connection issue
+  if (user && authError) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
         <div className="w-full max-w-md p-8 bg-white rounded-2xl shadow-lg border border-gray-200">
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">Welcome to ResearchViewer</h1>
-          <p className="text-sm text-gray-500 mb-6">Choose a username to complete your account</p>
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">Connection Error</h1>
+          <p className="text-sm text-gray-500 mb-6">{authError}</p>
 
-          {error && (
+          <div className="space-y-3">
+            <button
+              onClick={retryAuth}
+              className="w-full py-3 bg-gray-800 text-white rounded-lg font-medium hover:bg-gray-700 transition-colors"
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => signInWithGoogle()}
+              className="w-full py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+            >
+              Sign In Again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // User is signed in with Google but needs to register (new user)
+  if (user && needsRegistration) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="w-full max-w-md p-8 bg-white rounded-2xl shadow-lg border border-gray-200">
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">Create Your Account</h1>
+          <p className="text-sm text-gray-500 mb-6">Welcome! Choose a username to get started</p>
+
+          {localError && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
-              {error}
+              {localError}
             </div>
           )}
 
@@ -116,9 +143,9 @@ export function LoginPage() {
         <h1 className="text-3xl font-bold text-gray-800 mb-2 font-serif">ResearchViewer</h1>
         <p className="text-sm text-gray-500 mb-8">Explore and organize research papers</p>
 
-        {error && (
+        {localError && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
-            {error}
+            {localError}
           </div>
         )}
 

@@ -15,9 +15,12 @@ interface AuthContextType {
   userId: number | null;
   username: string | null;
   loading: boolean;
+  needsRegistration: boolean;
+  error: string | null;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   registerUser: (username: string) => Promise<void>;
+  retryAuth: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -27,32 +30,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [userId, setUserId] = useState<number | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [needsRegistration, setNeedsRegistration] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const checkUserProfile = async (firebaseUser: User) => {
+    try {
+      // Get and store Firebase ID token
+      const token = await firebaseUser.getIdToken(true); // Force refresh
+      localStorage.setItem('authToken', token);
+
+      // Try to get user profile from backend
+      const profile = await api.getAuthenticatedUser();
+      setUserId(profile.user_id);
+      setUsername(profile.username);
+      setNeedsRegistration(false);
+      setError(null);
+    } catch (err: any) {
+      // Check if user doesn't exist (404) vs other errors
+      const errorMessage = err?.message || String(err);
+
+      if (errorMessage.includes('404') || errorMessage.includes('User not found')) {
+        // User authenticated with Google but not registered in backend
+        console.log('New user - needs registration');
+        setUserId(null);
+        setUsername(null);
+        setNeedsRegistration(true);
+        setError(null);
+      } else {
+        // Other error (network, server down, etc.) - don't clear existing state
+        console.error('Error checking user profile:', err);
+        setError('Failed to connect to server. Please check your connection and try again.');
+        setNeedsRegistration(false);
+      }
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
+      setLoading(true);
 
       if (firebaseUser) {
-        try {
-          // Get and store Firebase ID token
-          const token = await firebaseUser.getIdToken();
-          localStorage.setItem('authToken', token);
-
-          // Try to get user profile from backend
-          const profile = await api.getAuthenticatedUser();
-          setUserId(profile.user_id);
-          setUsername(profile.username);
-        } catch (err) {
-          // User is authenticated with Firebase but not registered in backend yet
-          console.log('User not registered in backend yet');
-          setUserId(null);
-          setUsername(null);
-        }
+        await checkUserProfile(firebaseUser);
       } else {
         // User signed out
         localStorage.removeItem('authToken');
         setUserId(null);
         setUsername(null);
+        setNeedsRegistration(false);
+        setError(null);
       }
 
       setLoading(false);
@@ -95,9 +121,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       setUserId(data.user_id);
       setUsername(data.username);
+      setNeedsRegistration(false);
+      setError(null);
     } catch (error) {
       console.error('Registration error:', error);
       throw error;
+    }
+  };
+
+  const retryAuth = async () => {
+    if (user) {
+      setLoading(true);
+      setError(null);
+      await checkUserProfile(user);
+      setLoading(false);
     }
   };
 
@@ -108,9 +145,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         userId,
         username,
         loading,
+        needsRegistration,
+        error,
         signInWithGoogle,
         signOut,
-        registerUser
+        registerUser,
+        retryAuth
       }}
     >
       {children}
