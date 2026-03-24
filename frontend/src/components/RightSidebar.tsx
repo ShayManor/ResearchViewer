@@ -17,22 +17,20 @@ export function RightSidebar({ userId, readingListIds, onRemoveFromList, onAddTo
   const [recsLoading, setRecsLoading] = useState(false);
 
   useEffect(() => {
-    if (tab !== 'list') return;
     setListLoading(true);
     api.getReadingList(userId).then(d => setListPapers(d.papers)).catch(() => setListPapers([])).finally(() => setListLoading(false));
-  }, [tab, userId, readingListIds.size]);
+  }, [userId, readingListIds.size]);
 
   useEffect(() => {
-    if (tab !== 'hot' || hotFetched) return;
+    if (hotFetched) return;
     setHotLoading(true);
     api.hotPapers(8, userId).then(d => { setHotPapers(d.papers); setHotFetched(true); }).catch(() => {}).finally(() => setHotLoading(false));
-  }, [tab, hotFetched, userId]);
+  }, [hotFetched, userId]);
 
   useEffect(() => {
-    if (tab !== 'recs') return;
     setRecsLoading(true);
     api.getRecommendations(userId, 8).then(d => setRecs(d.recommendations)).catch(() => setRecs([])).finally(() => setRecsLoading(false));
-  }, [tab, userId, readingListIds.size]);
+  }, [userId, readingListIds.size]);
 
   return (
     <div className="flex flex-col h-full">
