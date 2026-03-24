@@ -37,6 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       // Get and store Firebase ID token
       const token = await firebaseUser.getIdToken(true); // Force refresh
+      console.log('Got Firebase token, length:', token.length, 'first 50 chars:', token.substring(0, 50));
       localStorage.setItem('authToken', token);
 
       // Try to get user profile from backend

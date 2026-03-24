@@ -47,7 +47,7 @@ def require_auth(f):
         if not auth_header or not auth_header.startswith('Bearer '):
             return jsonify({'error': 'Missing or invalid authorization header'}), 401
 
-        id_token = auth_header.split('Bearer ')[1]
+        id_token = auth_header.split('Bearer ')[1].strip()
 
         try:
             # Verify the ID token with Firebase
@@ -72,11 +72,14 @@ def require_auth(f):
 
             return f(*args, **kwargs)
 
-        except auth.InvalidIdTokenError:
+        except auth.InvalidIdTokenError as e:
+            print(f"InvalidIdTokenError: {str(e)}, token length: {len(id_token)}, token[:50]: {id_token[:50]}")
             return jsonify({'error': 'Invalid authentication token'}), 401
-        except auth.ExpiredIdTokenError:
+        except auth.ExpiredIdTokenError as e:
+            print(f"ExpiredIdTokenError: {str(e)}")
             return jsonify({'error': 'Authentication token expired'}), 401
         except Exception as e:
+            print(f"Auth exception: {type(e).__name__}: {str(e)}")
             return jsonify({'error': f'Authentication failed: {str(e)}'}), 401
 
     return decorated_function
