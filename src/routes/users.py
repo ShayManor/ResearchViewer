@@ -343,6 +343,10 @@ def delete_user(user_id):
 
     db = get_user_db()
 
+    # Get firebase_uid before deleting
+    user = db.execute("SELECT firebase_uid FROM users WHERE id = ?", [user_id]).fetchone()
+    firebase_uid = user[0] if user else None
+
     # Start transaction
     db.execute("BEGIN TRANSACTION")
 
@@ -355,6 +359,17 @@ def delete_user(user_id):
 
         # Commit transaction
         db.execute("COMMIT")
+
+        # Delete from Firebase Auth
+        if firebase_uid:
+            try:
+                from firebase_admin import auth
+                auth.delete_user(firebase_uid)
+                print(f"Deleted Firebase user: {firebase_uid}")
+            except Exception as firebase_error:
+                # Log but don't fail if Firebase deletion fails
+                # (user might already be deleted from Firebase)
+                print(f"Warning: Failed to delete Firebase user {firebase_uid}: {firebase_error}")
 
         # Clear cache
         clear_user_recommendations_cache(user_id)
