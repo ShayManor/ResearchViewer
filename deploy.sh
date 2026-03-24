@@ -13,6 +13,6 @@
    -v /home/shay/dev/ResearchViewer/src:/app/host_data \
    -v "$SECRETS_PATH/firebase-service-account.json:/app/firebase-service-account.json:ro" \
    -e DATA_DB_PATH=/app/host_data/data.db \
-   -e USER_DB_PATH=/app/src/user.db \
+   -e USER_DB_PATH=/app/host_data/user.db \
    -e FIREBASE_CREDENTIALS_PATH=/app/firebase-service-account.json \
    "$IMAGE_REF"
