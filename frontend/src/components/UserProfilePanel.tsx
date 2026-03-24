@@ -201,13 +201,27 @@ export function UserProfilePanel({ userId, onClose }: Props) {
               {profile.reading_over_time.length > 0 && (<div>
                 <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Reading Over Time</p>
                 <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                  <div className="flex items-end gap-1 h-16">{profile.reading_over_time.map(({ month, count }, i) => {
-                    const max = Math.max(...profile.reading_over_time.map(m => m.count), 1);
-                    return (<div key={month} className="flex-1 flex flex-col items-center gap-0.5" title={`${month}: ${count}`}>
-                      <span className="text-[7px] text-gray-400 font-mono">{count}</span>
-                      <div className="w-full rounded-t" style={{ height: `${(count / max) * 100}%`, minHeight: 2, backgroundColor: i === profile.reading_over_time.length - 1 ? '#3b82f6' : '#94a3b8' }} /></div>);
-                  })}</div>
-                  <div className="flex justify-between mt-1.5 text-[8px] text-gray-400 font-mono">
+                  <div className="flex gap-2">
+                    {/* Y-axis */}
+                    <div className="flex flex-col justify-between h-24 py-0.5">
+                      {(() => {
+                        const max = Math.max(...profile.reading_over_time.map(m => m.count), 1);
+                        const ticks = max <= 3 ? [max, Math.ceil(max / 2), 0] : [max, Math.ceil(max * 0.75), Math.ceil(max * 0.5), Math.ceil(max * 0.25), 0];
+                        return ticks.map((tick, i) => (
+                          <span key={i} className="text-[8px] text-gray-400 font-mono w-5 text-right">{tick}</span>
+                        ));
+                      })()}
+                    </div>
+                    {/* Bars */}
+                    <div className="flex-1 flex items-end gap-1 h-24 border-l border-b border-gray-200">{profile.reading_over_time.map(({ month, count }, i) => {
+                      const max = Math.max(...profile.reading_over_time.map(m => m.count), 1);
+                      const heightPct = (count / max) * 100;
+                      return (<div key={month} className="flex-1 flex flex-col items-center justify-end gap-0.5" title={`${month}: ${count}`}>
+                        <div className="w-full rounded-t" style={{ height: `${heightPct}%`, minHeight: count > 0 ? 4 : 2, backgroundColor: i === profile.reading_over_time.length - 1 ? '#3b82f6' : '#94a3b8' }} />
+                      </div>);
+                    })}</div>
+                  </div>
+                  <div className="flex justify-between mt-1.5 ml-7 text-[8px] text-gray-400 font-mono">
                     <span>{profile.reading_over_time[0]?.month}</span><span>{profile.reading_over_time[profile.reading_over_time.length - 1]?.month}</span></div>
                 </div></div>)}
               {profile.focus_topics.length > 0 && (<div><p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Focus Areas</p>

@@ -266,34 +266,34 @@ def get_user(user_id):
             # Daily buckets for <= 30 days
             reading_over_time = user_db.execute("""
                 SELECT
-                    CAST(read_at AS DATE) as period,
+                    CAST(read_at AS DATE) as month,
                     COUNT(*) as count
                 FROM user_read_history
                 WHERE user_id = ?
-                GROUP BY period
-                ORDER BY period
+                GROUP BY month
+                ORDER BY month
             """, [user_id]).fetchdf()
         elif days_range <= 180:
             # Weekly buckets for 30-180 days (6 months)
             reading_over_time = user_db.execute("""
                 SELECT
-                    DATE_TRUNC('week', read_at) as period,
+                    DATE_TRUNC('week', read_at) as month,
                     COUNT(*) as count
                 FROM user_read_history
                 WHERE user_id = ?
-                GROUP BY period
-                ORDER BY period
+                GROUP BY month
+                ORDER BY month
             """, [user_id]).fetchdf()
         else:
             # Monthly buckets for > 180 days
             reading_over_time = user_db.execute("""
                 SELECT
-                    DATE_TRUNC('month', read_at) as period,
+                    DATE_TRUNC('month', read_at) as month,
                     COUNT(*) as count
                 FROM user_read_history
                 WHERE user_id = ?
-                GROUP BY period
-                ORDER BY period
+                GROUP BY month
+                ORDER BY month
             """, [user_id]).fetchdf()
 
     user_data['reading_over_time'] = df_to_json_serializable(reading_over_time) if reading_over_time is not None and not reading_over_time.empty else []
@@ -678,7 +678,7 @@ def add_to_read_history(user_id):
     data = request.get_json()
 
     paper_id = data.get('paper_id')
-    read_at = data.get('read_at', datetime.date.today().isoformat())
+    read_at = data.get('read_at', datetime.datetime.now().isoformat())
 
     if not paper_id:
         return jsonify({"error": "paper_id is required"}), 400
