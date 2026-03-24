@@ -1,9 +1,23 @@
 const BASE = import.meta.env.VITE_API_URL || '';
 
+function getAuthToken(): string | null {
+  return localStorage.getItem('authToken');
+}
+
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+
+  // Add Authorization header if token exists
+  const token = getAuthToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const res = await fetch(`${BASE}${path}`, {
     ...opts,
-    headers: { 'Content-Type': 'application/json', ...(opts?.headers as Record<string, string> || {}) },
+    headers: { ...headers, ...(opts?.headers as Record<string, string> || {}) },
   });
   if (!res.ok) {
     let msg = `${res.status}`;
@@ -24,6 +38,16 @@ function enc(s: string) { return encodeURIComponent(s); }
 
 export const api = {
   health: () => req<HealthRes>('/api/health'),
+
+  // Auth
+  registerUser: (data: { firebase_uid: string; email: string; username: string }) =>
+    req<{ user_id: number; username: string; email: string }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getAuthenticatedUser: () => req<UserProfile>('/api/auth/me'),
+  deleteAccount: (uid: number) =>
+    req<{ status: string }>(`/api/users/${uid}`, { method: 'DELETE' }),
 
   // Papers
   getPapers: (p: PaperQuery = {}) => req<PapersRes>(`/api/papers${qs(p as any)}`),

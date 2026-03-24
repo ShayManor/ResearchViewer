@@ -81,10 +81,10 @@ created_at,TIMESTAMP,YES,,CURRENT_TIMESTAMP,
 
 
 TODO:
-1) Redis
-2) Deploy on vercel
-3) Login page with username + password
-4) Google login + firebase
+1) Authentication with firebase
+2) auth pages / frontend support
+3) Redis
+4) Docs for API + Readme
 5) Video
 ## Features
 

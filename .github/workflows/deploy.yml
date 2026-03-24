@@ -60,5 +60,13 @@ jobs:
     needs: build
 
     steps:
+      - name: Write Firebase secret to self-hosted runner
+        env:
+          FIREBASE_SECRET: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          mkdir -p ~/.researchviewer-secrets
+          echo "$FIREBASE_SECRET" > ~/.researchviewer-secrets/firebase-service-account.json
+          chmod 600 ~/.researchviewer-secrets/firebase-service-account.json
+
       - name: Deploy
         run: ~/dev/ResearchViewer/deploy.sh '${{ needs.build.outputs.image_ref }}'

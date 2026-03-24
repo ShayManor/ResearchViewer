@@ -1,11 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
-import { X, BookOpen, TrendingUp, User, Link2, Unlink, Plus, FileText, BarChart3, Loader2, ChevronDown } from 'lucide-react';
+import { X, BookOpen, TrendingUp, User, Link2, Unlink, Plus, FileText, BarChart3, Loader2, ChevronDown, LogOut, Trash2 } from 'lucide-react';
 import { getCatColor, fmtCit } from '../lib/colors';
 import { api, type UserProfile, type Publication } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Props { userId: number; onClose: () => void; }
 
 export function UserProfilePanel({ userId, onClose }: Props) {
+  const { signOut } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [pubs, setPubs] = useState<Publication[]>([]);
   const [pubCites, setPubCites] = useState(0);
@@ -19,6 +21,9 @@ export function UserProfilePanel({ userId, onClose }: Props) {
   const [pubVenue, setPubVenue] = useState('');
   const [pubYear, setPubYear] = useState(new Date().getFullYear());
   const [selectedDomain, setSelectedDomain] = useState<string>('all');
+  const [deleting, setDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   useEffect(() => {
     setLoading(true);
@@ -94,6 +99,31 @@ export function UserProfilePanel({ userId, onClose }: Props) {
   };
   const delPub = async (id: number) => {
     try { await api.deletePublication(userId, id); setPubs(p => p.filter(x => x.id !== id)); } catch {}
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      onClose();
+    } catch (err) {
+      console.error('Logout failed:', err);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText !== 'DELETE') {
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      await api.deleteAccount(userId);
+      await signOut();
+      onClose();
+    } catch (err) {
+      alert('Failed to delete account. Please try again or contact support.');
+      setDeleting(false);
+    }
   };
 
   if (loading || !profile) return (
@@ -283,10 +313,96 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                   <div className="flex justify-between"><span className="text-gray-500">Papers read</span><span className="font-mono text-gray-700">{st.papers_read_count}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">Publications</span><span className="font-mono text-gray-700">{st.publication_count}</span></div>
                 </div></div>
+              <div><p className="text-[10px] font-semibold text-gray-400 uppercase mb-2">Actions</p>
+                <div className="space-y-2">
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <LogOut size={14} />
+                    <span>Logout</span>
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-red-200 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    <Trash2 size={14} />
+                    <span>Delete Account</span>
+                  </button>
+                </div></div>
             </div>)}
           </div>
         </div>
       </div>
+
+      {/* Delete Account Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(''); }} />
+          <div className="relative bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-md p-6 space-y-4 animate-fade-in-up">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                <Trash2 size={20} className="text-red-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-gray-800">Delete Account</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  This action cannot be undone. This will permanently delete your account and remove all your data including:
+                </p>
+                <ul className="mt-2 space-y-1 text-xs text-gray-600">
+                  <li>• Reading lists ({st.reading_list_count} papers)</li>
+                  <li>• Read history ({st.papers_read_count} papers)</li>
+                  <li>• Publications ({st.publication_count} items)</li>
+                  <li>• All preferences and settings</li>
+                </ul>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Type <span className="font-mono font-bold text-red-600">DELETE</span> to confirm:
+              </label>
+              <input
+                type="text"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && deleteConfirmText === 'DELETE' && !deleting) {
+                    handleDeleteAccount();
+                  }
+                }}
+                placeholder="Type DELETE here"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(''); }}
+                disabled={deleting}
+                className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={deleteConfirmText !== 'DELETE' || deleting}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-red-600 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+              >
+                {deleting ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Delete Account</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

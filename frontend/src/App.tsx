@@ -7,9 +7,10 @@ import { SearchDialog } from './components/SearchDialog';
 import { UserProfilePanel } from './components/UserProfilePanel';
 import { AboutPanel } from './components/AboutPanel';
 import { StatsBar } from './components/StatsBar';
+import { LoginPage } from './components/LoginPage';
+import { useAuth } from './contexts/AuthContext';
 import { api, type DomainEntry, type TopicEntry, type GraphNode, type GraphEdge } from './lib/api';
-
-const USER_ID = 1;
+import { Loader2 } from 'lucide-react';
 
 interface DrillState {
   level: GraphLevel;
@@ -18,9 +19,10 @@ interface DrillState {
 }
 
 export default function App() {
+  const { userId, username: authUsername, loading: authLoading } = useAuth();
+
   const [apiOnline, setApiOnline] = useState(false);
   const [paperCount, setPaperCount] = useState<number | null>(null);
-  const [username, setUsername] = useState<string>('');
 
   // Drill state
   const [drill, setDrill] = useState<DrillState>({ level: 'domain', domain: null, topic: null });
@@ -61,9 +63,12 @@ export default function App() {
   useEffect(() => {
     api.health().then(h => { setApiOnline(true); setPaperCount(h.paper_count); }).catch(() => setApiOnline(false));
     api.getDomains(100).then(d => setDomains(d.domains)).catch(() => {});
-    api.getReadingList(USER_ID).then(d => setReadingListIds(new Set(d.papers.map(p => p.id)))).catch(() => {});
-    api.getUser(USER_ID).then(u => setUsername(u.username)).catch(() => {});
-  }, []);
+
+    // Only fetch user data if authenticated
+    if (userId) {
+      api.getReadingList(userId).then(d => setReadingListIds(new Set(d.papers.map(p => p.id)))).catch(() => {});
+    }
+  }, [userId]);
 
   // ── Drill handlers ─────────────────────────────────────────
   const drillIntoDomain = useCallback((domain: string) => {
@@ -101,19 +106,22 @@ export default function App() {
 
   // ── Reading list ───────────────────────────────────────────
   const addToList = useCallback((id: string) => {
+    if (!userId) return;
     setReadingListIds(prev => new Set(prev).add(id));
-    api.addToReadingList(USER_ID, id).catch(() => setReadingListIds(prev => { const n = new Set(prev); n.delete(id); return n; }));
-  }, []);
+    api.addToReadingList(userId, id).catch(() => setReadingListIds(prev => { const n = new Set(prev); n.delete(id); return n; }));
+  }, [userId]);
   const removeFromList = useCallback((id: string) => {
+    if (!userId) return;
     setReadingListIds(prev => { const n = new Set(prev); n.delete(id); return n; });
-    api.removeFromReadingList(USER_ID, id).catch(() => setReadingListIds(prev => new Set(prev).add(id)));
-  }, []);
+    api.removeFromReadingList(userId, id).catch(() => setReadingListIds(prev => new Set(prev).add(id)));
+  }, [userId]);
   const markAsRead = useCallback((id: string) => {
-    api.markAsRead(USER_ID, id).then(() => {
+    if (!userId) return;
+    api.markAsRead(userId, id).then(() => {
       // Optionally remove from reading list after marking as read
       removeFromList(id);
     }).catch(err => console.error('Failed to mark as read:', err));
-  }, [removeFromList]);
+  }, [userId, removeFromList]);
 
   // ── Keyboard shortcut ──────────────────────────────────────
   useEffect(() => {
@@ -177,9 +185,23 @@ export default function App() {
     };
   }, [isResizingLeft]);
 
+  // Show loading spinner while checking authentication
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <Loader2 size={32} className="animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
+  // Show login page if not authenticated
+  if (!userId) {
+    return <LoginPage />;
+  }
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      <Header onSearch={() => setSearchOpen(true)} onProfile={() => setProfileOpen(true)} apiOnline={apiOnline} readCount={readingListIds.size} username={username} />
+      <Header onSearch={() => setSearchOpen(true)} onProfile={() => setProfileOpen(true)} apiOnline={apiOnline} readCount={readingListIds.size} username={authUsername || ''} />
 
       <div className="flex flex-1 overflow-hidden">
         {selectedMicro && !leftPanelCollapsed && (
@@ -200,7 +222,7 @@ export default function App() {
             </div>
             <div className="flex-1 overflow-x-hidden">
               <MicrotopicPanel microtopicId={selectedMicro} allNodes={microNodes} onClose={() => { setSelectedMicro(null); setLeftPanelCollapsed(false); }}
-                readingListIds={readingListIds} onAddToList={addToList} onRemoveFromList={removeFromList} userId={USER_ID}
+                readingListIds={readingListIds} onAddToList={addToList} onRemoveFromList={removeFromList} userId={userId}
                 onCompareModeChange={setIsComparing} />
             </div>
           </div>
@@ -255,7 +277,7 @@ export default function App() {
               </svg>
             </button>
 
-              <RightSidebar userId={USER_ID} readingListIds={readingListIds} onRemoveFromList={removeFromList} onAddToList={addToList} onMarkAsRead={markAsRead} />
+              <RightSidebar userId={userId} readingListIds={readingListIds} onRemoveFromList={removeFromList} onAddToList={addToList} onMarkAsRead={markAsRead} />
             </div>
           </div>
         ) : (
@@ -275,7 +297,7 @@ export default function App() {
       <StatsBar paperCount={paperCount} drill={drill} microNodeCount={microNodes.length} microEdgeCount={microEdges.length} topicCount={topics.length} domainCount={domains.length} apiOnline={apiOnline} onAboutClick={() => setAboutOpen(true)} />
 
       {searchOpen && <SearchDialog onClose={() => setSearchOpen(false)} onAddToList={addToList} onMarkAsRead={markAsRead} readingListIds={readingListIds} />}
-      {profileOpen && <UserProfilePanel userId={USER_ID} onClose={() => setProfileOpen(false)} />}
+      {profileOpen && <UserProfilePanel userId={userId} onClose={() => setProfileOpen(false)} />}
       {aboutOpen && <AboutPanel onClose={() => setAboutOpen(false)} />}
     </div>
   );

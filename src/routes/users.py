@@ -1,8 +1,7 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from src.database import get_user_db, get_data_db, df_to_json_serializable
 from src.cache import cache
-import hashlib
-import secrets
+from src.auth import require_auth
 import datetime
 
 users_bp = Blueprint("users", __name__)
@@ -34,108 +33,65 @@ def clear_user_recommendations_cache(user_id):
     #     cache.delete(key)
 
 
-def hash_password(password: str) -> str:
-    """Hash password with embedded salt using SHA-256."""
-    salt = secrets.token_hex(16)
-    hashed = hashlib.sha256((password + salt).encode()).hexdigest()
-    return f"{salt}${hashed}"
-
-
-def verify_password(password: str, password_hash: str) -> bool:
-    """Verify password against stored hash."""
-    try:
-        salt, stored_hash = password_hash.split('$', 1)
-        new_hash = hashlib.sha256((password + salt).encode()).hexdigest()
-        return new_hash == stored_hash
-    except:
-        return False
-
-
 @users_bp.route("/api/auth/register", methods=["POST"])
 def register():
-    """Create account with username, email, password."""
+    """
+    Register new user after Firebase authentication.
+    Called by frontend after user completes Google OAuth.
+    """
     db = get_user_db()
     data = request.get_json()
 
-    username = data.get('username')
+    firebase_uid = data.get('firebase_uid')
     email = data.get('email')
-    password = data.get('password')
+    username = data.get('username')
     focus_topics = data.get('focus_topics', [])
 
-    if not username or not email or not password:
-        return jsonify({"error": "Username, email and password are required"}), 400
+    if not firebase_uid or not email or not username:
+        return jsonify({"error": "Missing required fields (firebase_uid, email, username)"}), 400
 
-    # Check if username or email already exists
+    # Check if user already exists
     existing = db.execute(
-        "SELECT COUNT(*) FROM users WHERE username = ? OR email = ?",
-        [username, email]
-    ).fetchone()[0]
+        "SELECT id FROM users WHERE firebase_uid = ? OR email = ? OR username = ?",
+        [firebase_uid, email, username]
+    ).fetchone()
 
-    if existing > 0:
-        return jsonify({"error": "Username or email already exists"}), 409
-
-    # Hash password
-    password_hash = hash_password(password)
+    if existing:
+        return jsonify({"error": "User already exists"}), 409
 
     # Get next user ID from sequence
-    max_id = db.execute("SELECT nextval('users_id_seq')").fetchone()[0]
+    next_id = db.execute("SELECT nextval('users_id_seq')").fetchone()[0]
 
-    # Create user
+    # Create user (no password_hash needed - using Firebase auth)
     db.execute("""
-        INSERT INTO users (id, username, email, password_hash, focus_topics, created_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    """, [max_id, username, email, password_hash, focus_topics])
+        INSERT INTO users (id, username, email, firebase_uid, password_hash, focus_topics, created_at)
+        VALUES (?, ?, ?, ?, '', ?, CURRENT_TIMESTAMP)
+    """, [next_id, username, email, firebase_uid, focus_topics])
 
-    # Generate session token
-    session_token = secrets.token_urlsafe(32)
+    db.commit()
 
     return jsonify({
-        "user_id": max_id,
+        "user_id": next_id,
         "username": username,
-        "session_token": session_token
+        "email": email
     }), 201
 
 
-@users_bp.route("/api/auth/login", methods=["POST"])
-def login():
-    """Authenticate user."""
-    db = get_user_db()
-    data = request.get_json()
-
-    username = data.get('username')
-    password = data.get('password')
-
-    if not username or not password:
-        return jsonify({"error": "Username and password are required"}), 400
-
-    # Get user
-    result = db.execute(
-        "SELECT id, password_hash FROM users WHERE username = ?",
-        [username]
-    ).fetchone()
-
-    if not result:
-        return jsonify({"error": "Invalid credentials"}), 401
-
-    user_id, stored_hash = result
-
-    # Verify password
-    if not verify_password(password, stored_hash):
-        return jsonify({"error": "Invalid credentials"}), 401
-
-    # Generate session token
-    session_token = secrets.token_urlsafe(32)
-
-    return jsonify({
-        "user_id": user_id,
-        "username": username,
-        "session_token": session_token
-    })
+@users_bp.route("/api/auth/me", methods=["GET"])
+@require_auth
+def get_current_user():
+    """Get currently authenticated user's profile."""
+    return get_user(g.user_id)
 
 
 @users_bp.route("/api/users/<int:user_id>", methods=["GET"])
+@require_auth
 def get_user(user_id):
     """Get user profile with all statistics."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     user_db = get_user_db()
     data_db = get_data_db()
 
@@ -302,8 +258,13 @@ def get_user(user_id):
 
 
 @users_bp.route("/api/users/<int:user_id>", methods=["PUT"])
+@require_auth
 def update_user(user_id):
     """Update profile fields."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     db = get_user_db()
     data = request.get_json()
 
@@ -337,9 +298,50 @@ def update_user(user_id):
     return jsonify({"status": "updated"})
 
 
+@users_bp.route("/api/users/<int:user_id>", methods=["DELETE"])
+@require_auth
+def delete_user(user_id):
+    """Delete user account and all associated data."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    db = get_user_db()
+
+    # Start transaction
+    db.execute("BEGIN TRANSACTION")
+
+    try:
+        # Delete all user data in order
+        db.execute("DELETE FROM user_reading_list WHERE user_id = ?", [user_id])
+        db.execute("DELETE FROM user_read_history WHERE user_id = ?", [user_id])
+        db.execute("DELETE FROM user_publications WHERE user_id = ?", [user_id])
+        db.execute("DELETE FROM users WHERE id = ?", [user_id])
+
+        # Commit transaction
+        db.execute("COMMIT")
+
+        # Clear cache
+        clear_user_recommendations_cache(user_id)
+
+        return jsonify({"status": "deleted"}), 200
+
+    except Exception as e:
+        # Rollback on error
+        db.execute("ROLLBACK")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "Failed to delete account", "details": str(e)}), 500
+
+
 @users_bp.route("/api/users/<int:user_id>/link-author", methods=["PUT"])
+@require_auth
 def link_author(user_id):
     """Link an author profile to user account and import their publications."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     user_db = get_user_db()
     data_db = get_data_db()
     data = request.get_json()
@@ -471,8 +473,13 @@ def link_author(user_id):
 
 
 @users_bp.route("/api/users/<int:user_id>/link-author", methods=["DELETE"])
+@require_auth
 def unlink_author(user_id):
     """Unlink author profile from user account and remove auto-imported publications."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     db = get_user_db()
 
     # Start transaction
@@ -503,8 +510,13 @@ def unlink_author(user_id):
 
 
 @users_bp.route("/api/users/<int:user_id>/reading-list", methods=["GET"])
+@require_auth
 def get_reading_list(user_id):
     """Get user's reading list."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     user_db = get_user_db()
     data_db = get_data_db()
 
@@ -554,8 +566,13 @@ def get_reading_list(user_id):
 
 
 @users_bp.route("/api/users/<int:user_id>/reading-list", methods=["POST"])
+@require_auth
 def add_to_reading_list(user_id):
     """Add paper to reading list."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     db = get_user_db()
     data = request.get_json()
 
@@ -595,8 +612,13 @@ def add_to_reading_list(user_id):
 
 
 @users_bp.route("/api/users/<int:user_id>/reading-list/<path:paper_id>", methods=["DELETE"])
+@require_auth
 def remove_from_reading_list(user_id, paper_id):
     """Remove paper from reading list."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     db = get_user_db()
 
     db.execute(
@@ -611,8 +633,13 @@ def remove_from_reading_list(user_id, paper_id):
 
 
 @users_bp.route("/api/users/<int:user_id>/read-history", methods=["GET"])
+@require_auth
 def get_read_history(user_id):
     """Get user's read history."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     user_db = get_user_db()
     data_db = get_data_db()
 
@@ -672,8 +699,13 @@ def get_read_history(user_id):
 
 
 @users_bp.route("/api/users/<int:user_id>/read-history", methods=["POST"])
+@require_auth
 def add_to_read_history(user_id):
     """Mark a paper as read."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     db = get_user_db()
     data = request.get_json()
 
@@ -705,8 +737,13 @@ def add_to_read_history(user_id):
 
 
 @users_bp.route("/api/users/<int:user_id>/read-history/<path:paper_id>", methods=["DELETE"])
+@require_auth
 def remove_from_read_history(user_id, paper_id):
     """Un-mark a paper as read."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     db = get_user_db()
 
     db.execute(
@@ -721,8 +758,13 @@ def remove_from_read_history(user_id, paper_id):
 
 
 @users_bp.route("/api/users/<int:user_id>/publications", methods=["GET"])
+@require_auth
 def get_publications(user_id):
     """Get user's publications."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     user_db = get_user_db()
 
     result = user_db.execute("""
@@ -747,8 +789,13 @@ def get_publications(user_id):
 
 
 @users_bp.route("/api/users/<int:user_id>/publications", methods=["POST"])
+@require_auth
 def add_publication(user_id):
     """Add a publication."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     db = get_user_db()
     data = request.get_json()
 
@@ -783,8 +830,13 @@ def add_publication(user_id):
 
 
 @users_bp.route("/api/users/<int:user_id>/publications/<int:pub_id>", methods=["PUT"])
+@require_auth
 def update_publication(user_id, pub_id):
     """Update a publication entry."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     db = get_user_db()
     data = request.get_json()
 
@@ -819,8 +871,13 @@ def update_publication(user_id, pub_id):
 
 
 @users_bp.route("/api/users/<int:user_id>/publications/<int:pub_id>", methods=["DELETE"])
+@require_auth
 def delete_publication(user_id, pub_id):
     """Delete a publication."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     db = get_user_db()
 
     db.execute(
@@ -832,9 +889,14 @@ def delete_publication(user_id, pub_id):
 
 
 @users_bp.route("/api/users/<int:user_id>/recommendations", methods=["GET"])
+@require_auth
 @cache.cached(timeout=600, query_string=True)
 def get_recommendations(user_id):
     """Get recommended papers based on reading history and topics with temporal weighting."""
+    # Verify the authenticated user matches the requested user_id
+    if g.user_id != user_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+
     user_db = get_user_db()
     data_db = get_data_db()
 
