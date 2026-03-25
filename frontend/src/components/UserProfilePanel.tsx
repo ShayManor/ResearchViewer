@@ -20,6 +20,12 @@ export function UserProfilePanel({ userId, onClose }: Props) {
   const [pubTitle, setPubTitle] = useState('');
   const [pubVenue, setPubVenue] = useState('');
   const [pubYear, setPubYear] = useState(new Date().getFullYear());
+  const [pubDoi, setPubDoi] = useState('');
+  const [pubUrl, setPubUrl] = useState('');
+  const [pubAuthors, setPubAuthors] = useState<string[]>([]);
+  const [authorSearchQ, setAuthorSearchQ] = useState('');
+  const [authorSearchRes, setAuthorSearchRes] = useState<{ author_id: string; name: string }[]>([]);
+  const [searchingAuthors, setSearchingAuthors] = useState(false);
   const [selectedDomain, setSelectedDomain] = useState<string>('all');
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -41,16 +47,6 @@ export function UserProfilePanel({ userId, onClose }: Props) {
     pub_citations: number;
     timestamp: string;
   } | null>(null);
-  const [previousSnapshot, setPreviousSnapshot] = useState<{
-    papers_read: number;
-    total_citations: number;
-    avg_citations: number;
-    reading_list: number;
-    publications: number;
-    pub_citations: number;
-    timestamp: string;
-  } | null>(null);
-  const [showComparison, setShowComparison] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -120,9 +116,53 @@ export function UserProfilePanel({ userId, onClose }: Props) {
       alert('Failed to unlink author. Please try again.');
     }
   };
+  const searchAuthorsForPub = async () => {
+    if (!authorSearchQ.trim()) return;
+    setSearchingAuthors(true);
+    try {
+      const r = await api.searchAuthors(authorSearchQ, 5);
+      setAuthorSearchRes(r.authors);
+    } catch {
+      setAuthorSearchRes([]);
+    }
+    setSearchingAuthors(false);
+  };
+
+  const addAuthorToPub = (name: string) => {
+    if (!pubAuthors.includes(name)) {
+      setPubAuthors([...pubAuthors, name]);
+    }
+    setAuthorSearchQ('');
+    setAuthorSearchRes([]);
+  };
+
+  const removeAuthorFromPub = (name: string) => {
+    setPubAuthors(pubAuthors.filter(a => a !== name));
+  };
+
   const addPub = async () => {
     if (!pubTitle.trim()) return;
-    try { await api.addPublication(userId, { title: pubTitle, venue: pubVenue, year: pubYear }); const p = await api.getPublications(userId); setPubs(p.publications); setPubCites(p.total_citations); setPubTitle(''); setPubVenue(''); } catch {}
+    try {
+      await api.addPublication(userId, {
+        title: pubTitle,
+        year: pubYear,
+        doi: pubDoi || undefined,
+        url: pubUrl || undefined,
+        coauthors: pubAuthors
+      });
+      const p = await api.getPublications(userId);
+      setPubs(p.publications);
+      setPubCites(p.total_citations);
+      // Reset form
+      setPubTitle('');
+      setPubDoi('');
+      setPubUrl('');
+      setPubAuthors([]);
+      setAuthorSearchQ('');
+      setAuthorSearchRes([]);
+    } catch (err) {
+      console.error('Failed to add publication:', err);
+    }
   };
   const delPub = async (id: number) => {
     try { await api.deletePublication(userId, id); setPubs(p => p.filter(x => x.id !== id)); } catch {}
@@ -134,6 +174,7 @@ export function UserProfilePanel({ userId, onClose }: Props) {
       venue: pub.venue,
       year: pub.year,
       doi: pub.doi,
+      url: pub.url,
       citation_count: pub.citation_count,
       coauthors: pub.coauthors
     });
@@ -199,7 +240,7 @@ export function UserProfilePanel({ userId, onClose }: Props) {
       // Calculate filtered stats
       const filteredPapersRead = filteredReading.reduce((sum, r) => sum + r.count, 0);
 
-      // Create snapshot for comparison
+      // Create snapshot
       const snapshot = {
         papers_read: filteredPapersRead,
         total_citations: userProfile.stats.total_citations_covered,
@@ -210,12 +251,6 @@ export function UserProfilePanel({ userId, onClose }: Props) {
         timestamp: new Date().toISOString()
       };
 
-      // Store previous snapshot for comparison
-      if (reportSnapshot) {
-        setPreviousSnapshot(reportSnapshot);
-        setShowComparison(true);
-      }
-
       setReportSnapshot(snapshot);
       setProfile(userProfile);
     } catch (err) {
@@ -223,6 +258,160 @@ export function UserProfilePanel({ userId, onClose }: Props) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const exportReport = () => {
+    if (!reportSnapshot || !profile) return;
+
+    const filterText = reportFilters.domain !== 'all'
+      ? `${reportFilters.domain}${reportFilters.topic !== 'all' ? ` · ${reportFilters.topic}` : ''}`
+      : 'All Topics';
+
+    // Generate overview stats
+    const statsHtml = `
+      <div class="stat-box"><div class="stat-label">Papers Read</div><div class="stat-value">${reportSnapshot.papers_read}</div></div>
+      <div class="stat-box"><div class="stat-label">Total Cites</div><div class="stat-value">${fmtCit(reportSnapshot.total_citations)}</div></div>
+      <div class="stat-box"><div class="stat-label">Avg/Paper</div><div class="stat-value">${fmtCit(Math.round(reportSnapshot.avg_citations))}</div></div>
+      <div class="stat-box"><div class="stat-label">Reading List</div><div class="stat-value">${reportSnapshot.reading_list}</div></div>
+      <div class="stat-box"><div class="stat-label">Publications</div><div class="stat-value">${reportSnapshot.publications}</div></div>
+      <div class="stat-box"><div class="stat-label">Pub Cites</div><div class="stat-value">${fmtCit(reportSnapshot.pub_citations)}</div></div>
+      <div class="stat-box"><div class="stat-label">Reading Pace</div><div class="stat-value">${st.reading_pace_per_week}/wk</div></div>
+      <div class="stat-box"><div class="stat-label">Days Active</div><div class="stat-value">${st.days_since_join}</div></div>
+    `;
+
+    // Generate reading over time chart
+    const readingChartHtml = profile.reading_over_time.length > 0 ? `
+      <h2>Reading Activity Over Time</h2>
+      <div class="chart-container">
+        <svg width="100%" height="120" viewBox="0 0 800 120" preserveAspectRatio="none">
+          ${(() => {
+            const max = Math.max(...profile.reading_over_time.map(m => m.count), 1);
+            const barWidth = 800 / profile.reading_over_time.length;
+            return profile.reading_over_time.map((item, i) => {
+              const height = (item.count / max) * 100;
+              const isLast = i === profile.reading_over_time.length - 1;
+              return `
+                <rect
+                  x="${i * barWidth + 2}"
+                  y="${100 - height}"
+                  width="${barWidth - 4}"
+                  height="${Math.max(height, 2)}"
+                  fill="${isLast ? '#374151' : '#9ca3af'}"
+                  rx="2"
+                >
+                  <title>${item.month}: ${item.count} papers</title>
+                </rect>
+              `;
+            }).join('');
+          })()}
+        </svg>
+        <div class="chart-labels">
+          <span>${profile.reading_over_time[0]?.month || ''}</span>
+          <span>${profile.reading_over_time[profile.reading_over_time.length - 1]?.month || ''}</span>
+        </div>
+      </div>
+    ` : '';
+
+    // Generate topic distribution
+    const topicDistHtml = profile.reading_by_microtopic.length > 0 ? `
+      <h2>Topic Distribution</h2>
+      ${Object.entries(readingByDomainAndTopic.byDomain)
+        .filter(([domain]) => reportFilters.domain === 'all' || reportFilters.domain === domain)
+        .slice(0, 3)
+        .map(([domain, topics]) => {
+          const topicEntries = Object.entries(topics).slice(0, 5);
+          return `
+            <div class="domain-section">
+              <h3>${domain}</h3>
+              ${topicEntries.map(([topic, microtopics]) => {
+                const topicTotal = microtopics.reduce((sum: number, m: any) => sum + m.count, 0);
+                const topicPct = reportSnapshot.papers_read > 0 ? (topicTotal / reportSnapshot.papers_read) * 100 : 0;
+                const cat = getCatColor(topic);
+                return `
+                  <div class="topic-row">
+                    <span class="topic-label">${topic.split('/').pop()}</span>
+                    <div class="topic-bar-container">
+                      <div class="topic-bar" style="width: ${topicPct}%; background-color: ${cat.border};"></div>
+                    </div>
+                    <span class="topic-value">${topicTotal}</span>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `;
+        }).join('')}
+    ` : '';
+
+    // Generate focus areas
+    const focusHtml = profile.focus_topics.length > 0 ? `
+      <h2>Focus Areas</h2>
+      <div class="focus-tags">
+        ${profile.focus_topics.slice(0, 10).map(t => {
+          const c = getCatColor(t);
+          return `<span class="focus-tag" style="background: ${c.fill}; color: ${c.text}; border-color: ${c.border};">${t.split('/').pop()}</span>`;
+        }).join('')}
+      </div>
+    ` : '';
+
+    const w = window.open('', '_blank');
+    if (!w) return;
+
+    w.document.write(`<!DOCTYPE html><html><head><title>${profile.username}'s Research Report</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'DM Sans', -apple-system, system-ui; color: #1f2937; padding: 40px; max-width: 900px; margin: 0 auto; font-size: 11px; background: #fafafa; line-height: 1.5; }
+      .header { background: white; border: 1px solid #e5e7eb; padding: 32px; border-radius: 12px; margin-bottom: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+      h1 { font-family: 'Instrument Serif', serif; font-size: 32px; font-weight: 600; margin-bottom: 8px; color: #111827; }
+      .subtitle { font-size: 14px; color: #6b7280; margin-bottom: 4px; }
+      .filter-badge { display: inline-block; padding: 6px 14px; background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 16px; font-size: 11px; font-weight: 600; margin-top: 12px; }
+      h2 { font-size: 12px; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: 0.05em; margin: 28px 0 12px; padding-bottom: 8px; border-bottom: 2px solid #e5e7eb; }
+      h3 { font-size: 11px; font-weight: 700; color: #4b5563; text-transform: uppercase; letter-spacing: 0.03em; margin: 16px 0 8px; }
+      .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 20px 0; }
+      .stat-box { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+      .stat-label { font-size: 10px; color: #6b7280; text-transform: uppercase; font-weight: 600; margin-bottom: 6px; letter-spacing: 0.03em; }
+      .stat-value { font-size: 22px; color: #111827; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+      .chart-container { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e5e7eb; margin: 12px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+      .chart-labels { display: flex; justify-content: space-between; margin-top: 8px; font-size: 9px; color: #9ca3af; font-family: 'JetBrains Mono', monospace; }
+      .domain-section { background: white; padding: 16px; border-radius: 8px; border: 1px solid #e5e7eb; margin: 12px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+      .topic-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+      .topic-label { width: 140px; font-size: 10px; color: #374151; font-weight: 600; }
+      .topic-bar-container { flex: 1; height: 20px; background: #f3f4f6; border-radius: 4px; overflow: hidden; }
+      .topic-bar { height: 100%; border-radius: 4px; }
+      .topic-value { width: 50px; font-size: 11px; color: #6b7280; font-weight: 600; font-family: 'JetBrains Mono', monospace; text-align: right; }
+      .focus-tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+      .focus-tag { padding: 6px 12px; border-radius: 16px; font-size: 10px; font-weight: 600; border: 1px solid; }
+      .footer { margin-top: 48px; padding-top: 20px; border-top: 2px solid #e5e7eb; font-size: 10px; color: #9ca3af; text-align: center; }
+      strong { font-weight: 700; color: #111827; }
+      @media print {
+        body { padding: 20px; background: white; }
+        .header { page-break-inside: avoid; }
+        .stat-grid { page-break-inside: avoid; }
+        .chart-container { page-break-inside: avoid; }
+        .domain-section { page-break-inside: avoid; }
+      }
+    </style></head><body>
+    <div class="header">
+      <h1>${profile.username}'s Research Report</h1>
+      <div class="subtitle">${profile.email} · Member since ${profile.created_at?.slice(0, 10)}</div>
+      <div class="subtitle">${reportSnapshot.papers_read} papers read · ${fmtCit(reportSnapshot.total_citations)} citations covered</div>
+      <div class="filter-badge">Filter: ${filterText}</div>
+    </div>
+
+    <h2>Overview Statistics</h2>
+    <div class="stat-grid">${statsHtml}</div>
+
+    ${readingChartHtml}
+    ${topicDistHtml}
+    ${focusHtml}
+
+    <div class="footer">
+      Generated by <strong>ResearchViewer</strong> on ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+    </div>
+    </body></html>`);
+
+    w.document.close();
+    setTimeout(() => w.print(), 500);
   };
 
   if (loading || !profile) return (
@@ -372,8 +561,8 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                 ) : (<div className="space-y-2">
                   <p className="text-xs text-gray-500">Link your author profile to track publications.</p>
                   <div className="flex gap-2">
-                    <input type="text" value={authorQ} onChange={e => setAuthorQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchAuthor()} placeholder="Search by name…" className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none placeholder:text-gray-300" />
-                    <button onClick={searchAuthor} disabled={searching} className="px-3 py-2 rounded-lg bg-gray-800 text-white text-sm font-medium disabled:opacity-50">{searching ? <Loader2 size={14} className="animate-spin" /> : 'Search'}</button>
+                    <input type="text" value={authorQ} onChange={e => setAuthorQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchAuthor()} placeholder="Search by name…" className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-gray-400 placeholder:text-gray-300" />
+                    <button onClick={searchAuthor} disabled={searching} className="px-3 py-2 rounded-lg bg-gray-800 text-white text-sm font-medium hover:bg-gray-700 disabled:opacity-50">{searching ? <Loader2 size={14} className="animate-spin" /> : 'Search'}</button>
                   </div>
                   {authorRes.length > 0 && <div className="space-y-1">{authorRes.map(a => (
                     <button key={a.author_id} onClick={() => linkAuthor(a.author_id)} disabled={linking} className="w-full flex items-center gap-2 p-2.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-left disabled:opacity-50 disabled:cursor-not-allowed">
@@ -384,66 +573,94 @@ export function UserProfilePanel({ userId, onClose }: Props) {
               </div>
               <div><p className="text-[10px] font-semibold text-gray-400 uppercase mb-2">Your Publications</p>
                 {pubs.length > 0 ? <div className="space-y-2">{pubs.map(p => (
-                  <div key={p.id} className={`p-3 rounded-xl border ${editingPubId === p.id ? 'border-blue-300 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                  <div key={p.id} className={`p-3 rounded-xl border transition-all ${editingPubId === p.id ? 'border-blue-200 bg-blue-50/50' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}>
                     {editingPubId === p.id ? (
-                      <div className="space-y-2">
-                        <input
-                          type="text"
-                          value={editForm.title || ''}
-                          onChange={e => setEditForm({ ...editForm, title: e.target.value })}
-                          placeholder="Title"
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none placeholder:text-gray-300"
-                        />
-                        <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-[10px] text-gray-500 font-medium mb-1 block">Title *</label>
                           <input
                             type="text"
-                            value={editForm.venue || ''}
-                            onChange={e => setEditForm({ ...editForm, venue: e.target.value })}
-                            placeholder="Venue"
-                            className="px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none placeholder:text-gray-300"
-                          />
-                          <input
-                            type="number"
-                            value={editForm.year || ''}
-                            onChange={e => setEditForm({ ...editForm, year: parseInt(e.target.value) || undefined })}
-                            placeholder="Year"
-                            className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-mono focus:outline-none placeholder:text-gray-300"
+                            value={editForm.title || ''}
+                            onChange={e => setEditForm({ ...editForm, title: e.target.value })}
+                            placeholder="Publication title"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder:text-gray-300"
                           />
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] text-gray-500 font-medium mb-1 block">Venue</label>
+                            <input
+                              type="text"
+                              value={editForm.venue || ''}
+                              onChange={e => setEditForm({ ...editForm, venue: e.target.value })}
+                              placeholder="Conference/Journal"
+                              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder:text-gray-300"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-gray-500 font-medium mb-1 block">Year *</label>
+                            <input
+                              type="number"
+                              value={editForm.year || ''}
+                              onChange={e => setEditForm({ ...editForm, year: parseInt(e.target.value) || undefined })}
+                              placeholder="2024"
+                              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm font-mono focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder:text-gray-300"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] text-gray-500 font-medium mb-1 block">DOI</label>
+                            <input
+                              type="text"
+                              value={editForm.doi || ''}
+                              onChange={e => setEditForm({ ...editForm, doi: e.target.value })}
+                              placeholder="10.1234/example"
+                              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm font-mono focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder:text-gray-300"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-gray-500 font-medium mb-1 block">Citations</label>
+                            <input
+                              type="number"
+                              value={editForm.citation_count ?? ''}
+                              onChange={e => setEditForm({ ...editForm, citation_count: parseInt(e.target.value) || 0 })}
+                              placeholder="0"
+                              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm font-mono focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder:text-gray-300"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-gray-500 font-medium mb-1 block">URL</label>
                           <input
                             type="text"
-                            value={editForm.doi || ''}
-                            onChange={e => setEditForm({ ...editForm, doi: e.target.value })}
-                            placeholder="DOI"
-                            className="px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none placeholder:text-gray-300"
-                          />
-                          <input
-                            type="number"
-                            value={editForm.citation_count ?? ''}
-                            onChange={e => setEditForm({ ...editForm, citation_count: parseInt(e.target.value) || 0 })}
-                            placeholder="Citations"
-                            className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-mono focus:outline-none placeholder:text-gray-300"
+                            value={editForm.url || ''}
+                            onChange={e => setEditForm({ ...editForm, url: e.target.value })}
+                            placeholder="https://example.com/paper.pdf"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder:text-gray-300"
                           />
                         </div>
-                        <input
-                          type="text"
-                          value={editForm.coauthors?.join(', ') || ''}
-                          onChange={e => setEditForm({ ...editForm, coauthors: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
-                          placeholder="Co-authors (comma-separated)"
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none placeholder:text-gray-300"
-                        />
+                        <div>
+                          <label className="text-[10px] text-gray-500 font-medium mb-1 block">Co-authors (comma-separated)</label>
+                          <input
+                            type="text"
+                            value={editForm.coauthors?.join(', ') || ''}
+                            onChange={e => setEditForm({ ...editForm, coauthors: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                            placeholder="Alice Smith, Bob Jones"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder:text-gray-300"
+                          />
+                        </div>
                         <div className="flex gap-2 pt-1">
                           <button
                             onClick={handleSaveEdit}
                             disabled={!editForm.title?.trim()}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium disabled:opacity-40 hover:bg-blue-700"
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
                           >
-                            <Check size={14} /> Save
+                            <Check size={14} /> Save Changes
                           </button>
                           <button
                             onClick={handleCancelEdit}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-100"
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-100 transition-colors"
                           >
                             <X size={14} /> Cancel
                           </button>
@@ -452,32 +669,35 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                     ) : (
                       <div className="group flex items-start justify-between gap-2">
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-gray-700">{p.title}</p>
-                          <div className="flex items-center gap-3 mt-1 text-[10px] text-gray-400">
-                            {p.venue && <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">{p.venue}</span>}
-                            <span>{p.year}</span>
-                            <span>{p.citation_count} cites</span>
-                            {p.doi && <span className="font-mono">{p.doi}</span>}
+                          <p className="text-sm font-medium text-gray-800">{p.title}</p>
+                          <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                            {p.venue && <span className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 text-[10px] font-medium">{p.venue}</span>}
+                            <span className="text-[10px] text-gray-500">{p.year}</span>
+                            <span className="text-[10px] text-gray-500 font-mono">{p.citation_count} citations</span>
+                            {p.doi && <span className="text-[10px] text-blue-600 font-mono">{p.doi}</span>}
+                            {p.url && <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-600 hover:underline">🔗 Link</a>}
                           </div>
                           {p.coauthors && p.coauthors.length > 0 && (
-                            <div className="flex items-center gap-1 mt-1">
-                              <span className="text-[9px] text-gray-400">Co-authors:</span>
-                              <span className="text-[9px] text-gray-500">{p.coauthors.join(', ')}</span>
+                            <div className="flex items-center gap-1 mt-1.5">
+                              <span className="text-[9px] text-gray-400 font-medium">Co-authors:</span>
+                              <span className="text-[9px] text-gray-600">{p.coauthors.join(', ')}</span>
                             </div>
                           )}
                         </div>
-                        <div className="flex gap-1 opacity-0 group-hover:opacity-100">
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
                             onClick={() => handleEditClick(p)}
-                            className="p-1 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                            title="Edit publication"
                           >
-                            <Edit2 size={12} />
+                            <Edit2 size={13} />
                           </button>
                           <button
                             onClick={() => delPub(p.id)}
-                            className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            title="Delete publication"
                           >
-                            <X size={12} />
+                            <Trash2 size={13} />
                           </button>
                         </div>
                       </div>
@@ -486,59 +706,146 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                 ))}</div>
                   : <p className="text-xs text-gray-400 italic">No publications yet</p>}
               </div>
-              <div><p className="text-[10px] font-semibold text-gray-400 uppercase mb-2">Add Publication</p>
-                <div className="space-y-2">
-                  <input type="text" value={pubTitle} onChange={e => setPubTitle(e.target.value)} placeholder="Title" className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none placeholder:text-gray-300" />
-                  <div className="flex gap-2"><input type="text" value={pubVenue} onChange={e => setPubVenue(e.target.value)} placeholder="Venue" className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none placeholder:text-gray-300" />
-                    <input type="number" value={pubYear} onChange={e => setPubYear(parseInt(e.target.value))} className="w-20 px-3 py-2 rounded-lg border border-gray-200 text-sm font-mono focus:outline-none" /></div>
-                  <button onClick={addPub} disabled={!pubTitle.trim()} className="w-full py-2.5 rounded-lg bg-gray-800 text-white text-sm font-medium disabled:opacity-40 flex items-center justify-center gap-1.5"><Plus size={14} /> Add</button>
-                </div></div>
+              <div>
+                <p className="text-[10px] font-semibold text-gray-400 uppercase mb-3">Add Publication</p>
+                <div className="p-4 rounded-xl border border-gray-200 bg-gray-50 space-y-3">
+                  <div>
+                    <label className="text-xs text-gray-600 font-medium mb-1.5 block">Title *</label>
+                    <input
+                      type="text"
+                      value={pubTitle}
+                      onChange={e => setPubTitle(e.target.value)}
+                      placeholder="Your paper title"
+                      className="w-full px-3 py-2.5 rounded-lg border border-gray-200 bg-white text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder:text-gray-300"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-gray-600 font-medium mb-1.5 block">Year *</label>
+                      <input
+                        type="number"
+                        value={pubYear}
+                        onChange={e => setPubYear(parseInt(e.target.value))}
+                        placeholder="2024"
+                        className="w-full px-3 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-mono focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-600 font-medium mb-1.5 block">DOI (optional)</label>
+                      <input
+                        type="text"
+                        value={pubDoi}
+                        onChange={e => setPubDoi(e.target.value)}
+                        placeholder="10.1234/example"
+                        className="w-full px-3 py-2.5 rounded-lg border border-gray-200 bg-white text-sm font-mono focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder:text-gray-300"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-gray-600 font-medium mb-1.5 block">URL (optional)</label>
+                    <input
+                      type="text"
+                      value={pubUrl}
+                      onChange={e => setPubUrl(e.target.value)}
+                      placeholder="https://example.com/paper.pdf"
+                      className="w-full px-3 py-2.5 rounded-lg border border-gray-200 bg-white text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder:text-gray-300"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-gray-600 font-medium mb-1.5 block">Authors</label>
+                    {pubAuthors.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {pubAuthors.map((name, idx) => (
+                          <span key={idx} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-blue-100 text-blue-700 text-xs">
+                            {name}
+                            <button
+                              onClick={() => removeAuthorFromPub(name)}
+                              className="hover:text-blue-900"
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={authorSearchQ}
+                        onChange={e => setAuthorSearchQ(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && searchAuthorsForPub()}
+                        placeholder="Search for author..."
+                        className="flex-1 px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder:text-gray-300"
+                      />
+                      <button
+                        onClick={searchAuthorsForPub}
+                        disabled={searchingAuthors || !authorSearchQ.trim()}
+                        className="px-3 py-2 rounded-lg bg-gray-700 text-white text-sm font-medium hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {searchingAuthors ? <Loader2 size={14} className="animate-spin" /> : 'Search'}
+                      </button>
+                    </div>
+                    {authorSearchRes.length > 0 && (
+                      <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                        {authorSearchRes.map(a => (
+                          <button
+                            key={a.author_id}
+                            onClick={() => addAuthorToPub(a.name)}
+                            className="w-full flex items-center gap-2 p-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-left transition-colors"
+                          >
+                            <User size={12} className="text-gray-400 shrink-0" />
+                            <span className="text-xs text-gray-700">{a.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={addPub}
+                    disabled={!pubTitle.trim()}
+                    className="w-full py-2.5 rounded-lg bg-gray-800 text-white text-sm font-medium hover:bg-gray-900 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Plus size={14} /> Add Publication
+                  </button>
+                </div>
+              </div>
             </div>)}
 
             {tab === 'report' && (
-              <div className="space-y-6">
-                {/* Header */}
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-800 mb-1">My Research Report</h3>
-                  <p className="text-xs text-gray-500">
-                    Filter your reading statistics and see how they change over time
-                  </p>
+              <div className="space-y-5">
+                {/* Header with Export */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800 mb-0.5">Research Report</h3>
+                    <p className="text-xs text-gray-500">
+                      Analyze your reading patterns and statistics
+                    </p>
+                  </div>
+                  {reportSnapshot && (
+                    <button
+                      onClick={exportReport}
+                      className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
+                    >
+                      <FileText size={12} />
+                      Export
+                    </button>
+                  )}
                 </div>
 
                 {/* Filters Section */}
-                <div className="p-4 rounded-xl border border-gray-200 bg-gray-50 space-y-3">
-                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
-                    Report Filters
-                  </p>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    {/* Date Range */}
-                    <div>
-                      <label className="text-xs text-gray-600 block mb-1">Start Date</label>
-                      <input
-                        type="date"
-                        value={reportFilters.startDate}
-                        onChange={e => setReportFilters({...reportFilters, startDate: e.target.value})}
-                        className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-blue-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-gray-600 block mb-1">End Date</label>
-                      <input
-                        type="date"
-                        value={reportFilters.endDate}
-                        onChange={e => setReportFilters({...reportFilters, endDate: e.target.value})}
-                        className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-blue-400"
-                      />
-                    </div>
-
+                <div className="p-3.5 rounded-xl border border-gray-200 bg-gray-50">
+                  <div className="grid grid-cols-2 gap-2.5">
                     {/* Domain Filter */}
                     <div>
-                      <label className="text-xs text-gray-600 block mb-1">Domain</label>
+                      <label className="text-[10px] text-gray-500 font-medium mb-1 block">Domain</label>
                       <select
                         value={reportFilters.domain}
-                        onChange={e => setReportFilters({...reportFilters, domain: e.target.value})}
-                        className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-blue-400"
+                        onChange={e => setReportFilters({...reportFilters, domain: e.target.value, topic: 'all'})}
+                        className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-gray-400"
                       >
                         <option value="all">All Domains</option>
                         {readingByDomainAndTopic.domains.map(d => (
@@ -547,14 +854,14 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                       </select>
                     </div>
 
-                    {/* Topic Filter (depends on domain) */}
+                    {/* Topic Filter */}
                     <div>
-                      <label className="text-xs text-gray-600 block mb-1">Topic</label>
+                      <label className="text-[10px] text-gray-500 font-medium mb-1 block">Topic</label>
                       <select
                         value={reportFilters.topic}
                         onChange={e => setReportFilters({...reportFilters, topic: e.target.value})}
                         disabled={reportFilters.domain === 'all'}
-                        className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-blue-400 disabled:bg-gray-100 disabled:text-gray-400"
+                        className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-gray-400 disabled:bg-gray-100 disabled:text-gray-400"
                       >
                         <option value="all">All Topics</option>
                         {reportFilters.domain !== 'all' &&
@@ -566,25 +873,19 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                     </div>
                   </div>
 
-                  {/* Generate/Refresh Button */}
                   <button
                     onClick={generateReport}
                     disabled={loading}
-                    className="w-full py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                    className="w-full mt-2.5 py-2 rounded-lg bg-gray-800 text-white text-sm font-medium hover:bg-gray-700 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
                     {loading ? (
                       <>
                         <Loader2 size={14} className="animate-spin" />
                         <span>Generating...</span>
                       </>
-                    ) : reportSnapshot ? (
-                      <>
-                        <BarChart3 size={14} />
-                        <span>Refresh Report</span>
-                      </>
                     ) : (
                       <>
-                        <FileText size={14} />
+                        <BarChart3 size={14} />
                         <span>Generate Report</span>
                       </>
                     )}
@@ -592,65 +893,148 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                 </div>
 
                 {/* Report Display */}
-                {reportSnapshot && (
-                  <div className="space-y-4">
-                    {/* Current Report */}
-                    <div className="p-4 rounded-xl border-2 border-blue-200 bg-blue-50">
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-xs font-semibold text-blue-800">
-                          Current Report
-                        </p>
-                        <span className="text-[10px] text-blue-500 font-mono">
-                          {new Date(reportSnapshot.timestamp).toLocaleString()}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-3">
-                        <ReportMetric
-                          label="Papers Read"
-                          value={reportSnapshot.papers_read}
-                          previous={previousSnapshot?.papers_read}
-                        />
-                        <ReportMetric
-                          label="Total Cites"
-                          value={reportSnapshot.total_citations}
-                          previous={previousSnapshot?.total_citations}
-                        />
-                        <ReportMetric
-                          label="Avg/Paper"
-                          value={Math.round(reportSnapshot.avg_citations)}
-                          previous={previousSnapshot ? Math.round(previousSnapshot.avg_citations) : undefined}
-                        />
-                        <ReportMetric
-                          label="Reading List"
-                          value={reportSnapshot.reading_list}
-                          previous={previousSnapshot?.reading_list}
-                        />
-                        <ReportMetric
-                          label="Publications"
-                          value={reportSnapshot.publications}
-                          previous={previousSnapshot?.publications}
-                        />
-                        <ReportMetric
-                          label="Pub Cites"
-                          value={reportSnapshot.pub_citations}
-                          previous={previousSnapshot?.pub_citations}
-                        />
+                {reportSnapshot && profile && (
+                  <div className="space-y-5">
+                    {/* Key Metrics */}
+                    <div>
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                        Overview
+                      </p>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100">
+                          <p className="text-[8px] text-gray-400 uppercase tracking-wide mb-0.5">Papers Read</p>
+                          <p className="text-xl font-bold text-gray-800 font-mono">{reportSnapshot.papers_read}</p>
+                        </div>
+                        <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100">
+                          <p className="text-[8px] text-gray-400 uppercase tracking-wide mb-0.5">Citations</p>
+                          <p className="text-xl font-bold text-gray-800 font-mono">{fmtCit(reportSnapshot.total_citations)}</p>
+                        </div>
+                        <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100">
+                          <p className="text-[8px] text-gray-400 uppercase tracking-wide mb-0.5">Avg/Paper</p>
+                          <p className="text-xl font-bold text-gray-800 font-mono">{fmtCit(Math.round(reportSnapshot.avg_citations))}</p>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Instructions for Demo */}
-                    <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
-                      <p className="text-xs text-amber-800 font-medium mb-1">
-                        CS348 Demo Instructions
+                    {/* Reading Over Time */}
+                    {profile.reading_over_time.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                          Reading Activity
+                        </p>
+                        <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                          <div className="flex gap-2">
+                            {/* Y-axis */}
+                            <div className="flex flex-col justify-between h-24 py-0.5">
+                              {(() => {
+                                const max = Math.max(...profile.reading_over_time.map(m => m.count), 1);
+                                const ticks = max <= 3 ? [max, Math.ceil(max / 2), 0] : [max, Math.ceil(max * 0.75), Math.ceil(max * 0.5), Math.ceil(max * 0.25), 0];
+                                return ticks.map((tick, i) => (
+                                  <span key={i} className="text-[8px] text-gray-400 font-mono w-5 text-right">{tick}</span>
+                                ));
+                              })()}
+                            </div>
+                            {/* Bars */}
+                            <div className="flex-1 flex items-end gap-1 h-24 border-l border-b border-gray-200">
+                              {profile.reading_over_time.map(({ month, count }, i) => {
+                                const max = Math.max(...profile.reading_over_time.map(m => m.count), 1);
+                                const containerHeight = 96;
+                                const heightPx = Math.max((count / max) * containerHeight, count > 0 ? 4 : 2);
+                                return (
+                                  <div key={month} className="flex-1 flex flex-col items-center justify-end" title={`${month}: ${count} papers`}>
+                                    <div className="w-full rounded-t" style={{ height: `${heightPx}px`, backgroundColor: i === profile.reading_over_time.length - 1 ? '#374151' : '#9ca3af' }} />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div className="flex justify-between mt-1.5 ml-7 text-[8px] text-gray-400 font-mono">
+                            <span>{profile.reading_over_time[0]?.month}</span>
+                            <span>{profile.reading_over_time[profile.reading_over_time.length - 1]?.month}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Topic Breakdown */}
+                    {profile.reading_by_microtopic && profile.reading_by_microtopic.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                          Topic Distribution
+                        </p>
+                        <div className="space-y-3">
+                          {Object.entries(
+                            readingByDomainAndTopic.byDomain
+                          )
+                            .filter(([domain]) => reportFilters.domain === 'all' || reportFilters.domain === domain)
+                            .slice(0, 3)
+                            .map(([domain, topics]) => {
+                              const topicEntries = Object.entries(topics).slice(0, 3);
+                              return (
+                                <div key={domain} className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                                  <p className="text-[9px] font-bold text-gray-600 uppercase tracking-wider mb-2">{domain}</p>
+                                  <div className="space-y-1.5">
+                                    {topicEntries.map(([topic, microtopics]) => {
+                                      const topicTotal = microtopics.reduce((sum, m) => sum + m.count, 0);
+                                      const topicPct = reportSnapshot.papers_read > 0 ? (topicTotal / reportSnapshot.papers_read) * 100 : 0;
+                                      const cat = getCatColor(topic);
+                                      return (
+                                        <div key={topic} className="flex items-center gap-2">
+                                          <span className="text-[10px] font-medium text-gray-700 w-24 truncate" title={topic}>
+                                            {topic.split('/').pop()}
+                                          </span>
+                                          <div className="flex-1 h-1.5 bg-gray-200 rounded overflow-hidden">
+                                            <div className="h-full rounded" style={{ width: `${topicPct}%`, backgroundColor: cat.border }} />
+                                          </div>
+                                          <span className="w-8 text-right text-[10px] text-gray-500 font-mono">{topicTotal}</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Insights */}
+                    <div>
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                        Insights
                       </p>
-                      <ol className="text-xs text-amber-700 space-y-1 ml-4 list-decimal">
-                        <li>Note the current report statistics above</li>
-                        <li>Go to Publications tab and add/edit/delete a publication</li>
-                        <li>Or mark a paper as read from the main interface</li>
-                        <li>Return to this tab and click "Refresh Report"</li>
-                        <li>See the updated statistics with change indicators</li>
-                      </ol>
+                      <div className="space-y-2">
+                        <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100 text-xs text-gray-700">
+                          <span className="font-medium">Reading pace:</span> {st.reading_pace_per_week} papers/week over {st.days_since_join} days
+                        </div>
+                        {reportSnapshot.publications > 0 && (
+                          <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100 text-xs text-gray-700">
+                            <span className="font-medium">Publications:</span> {reportSnapshot.publications} papers with {fmtCit(reportSnapshot.pub_citations)} total citations
+                          </div>
+                        )}
+                        {profile.focus_topics.length > 0 && (
+                          <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100">
+                            <p className="text-xs text-gray-700 font-medium mb-1">Focus areas:</p>
+                            <div className="flex flex-wrap gap-1">
+                              {profile.focus_topics.slice(0, 5).map(t => {
+                                const c = getCatColor(t);
+                                return (
+                                  <span key={t} className="px-2 py-0.5 rounded-full text-[10px] font-medium border" style={{ backgroundColor: c.fill, color: c.text, borderColor: c.border + '40' }}>
+                                    {t.split('/').pop()}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Timestamp */}
+                    <div className="text-center">
+                      <span className="text-[9px] text-gray-400 font-mono">
+                        Generated on {new Date(reportSnapshot.timestamp).toLocaleString()}
+                      </span>
                     </div>
                   </div>
                 )}
@@ -658,9 +1042,10 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                 {/* Empty State */}
                 {!reportSnapshot && !loading && (
                   <div className="text-center py-12">
-                    <BarChart3 size={48} className="mx-auto text-gray-300 mb-3" />
-                    <p className="text-sm text-gray-500">
-                      Click "Generate Report" to see your filtered statistics
+                    <BarChart3 size={40} className="mx-auto text-gray-300 mb-2" />
+                    <p className="text-sm text-gray-600 font-medium mb-1">No Report Generated</p>
+                    <p className="text-xs text-gray-500">
+                      Configure filters above and click "Generate Report"
                     </p>
                   </div>
                 )}
@@ -770,39 +1155,6 @@ export function UserProfilePanel({ userId, onClose }: Props) {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function ReportMetric({
-  label,
-  value,
-  previous
-}: {
-  label: string;
-  value: number;
-  previous?: number;
-}) {
-  const delta = previous !== undefined ? value - previous : 0;
-  const hasDelta = previous !== undefined && delta !== 0;
-
-  return (
-    <div className="p-2.5 rounded-lg bg-white border border-gray-200">
-      <p className="text-[9px] text-gray-500 uppercase tracking-wide mb-1">
-        {label}
-      </p>
-      <div className="flex items-baseline gap-2">
-        <span className="text-lg font-bold text-gray-800 font-mono">
-          {value.toLocaleString()}
-        </span>
-        {hasDelta && (
-          <span className={`text-[10px] font-semibold ${
-            delta > 0 ? 'text-green-600' : 'text-red-600'
-          }`}>
-            {delta > 0 ? '↑' : '↓'}{Math.abs(delta)}
-          </span>
-        )}
-      </div>
     </div>
   );
 }

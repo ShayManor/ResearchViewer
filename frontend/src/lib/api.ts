@@ -114,6 +114,7 @@ export const api = {
     venue?: string;
     year?: number;
     doi?: string;
+    url?: string;
     citation_count?: number;
     coauthors?: string[];
   }) =>
@@ -185,5 +186,5 @@ export interface UserProfile {
   reading_by_microtopic: { microtopic_id: string; microtopic_label: string; topic: string; domain: string; count: number }[];
   reading_over_time: { month: string; count: number }[];
 }
-export interface Publication { id: number; title: string; venue?: string; year: number; doi?: string; citation_count: number; coauthors: string[]; }
+export interface Publication { id: number; title: string; venue?: string; year: number; doi?: string; url?: string; citation_count: number; coauthors: string[]; }
 export interface Recommendation extends Paper { reason: string; score: number; }

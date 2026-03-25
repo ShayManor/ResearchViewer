@@ -818,7 +818,7 @@ def get_publications(user_id):
     user_db = get_user_db()
 
     result = user_db.execute("""
-        SELECT id, title, venue, year, doi, citation_count, coauthors
+        SELECT id, title, venue, year, doi, url, citation_count, coauthors
         FROM user_publications
         WHERE user_id = ?
         ORDER BY year DESC, id DESC
@@ -853,6 +853,7 @@ def add_publication(user_id):
     venue = data.get('venue')
     year = data.get('year')
     doi = data.get('doi')
+    url = data.get('url')
     citation_count = data.get('citation_count', 0)
     coauthors = data.get('coauthors', [])
 
@@ -864,10 +865,10 @@ def add_publication(user_id):
         # Use RETURNING to get the generated ID
         result = db.execute("""
             INSERT INTO user_publications
-            (user_id, title, venue, year, doi, citation_count, coauthors)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (user_id, title, venue, year, doi, url, citation_count, coauthors)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
-        """, [user_id, title, venue, year, doi, citation_count, coauthors]).fetchone()
+        """, [user_id, title, venue, year, doi, url, citation_count, coauthors]).fetchone()
 
         new_id = result[0]
 
@@ -903,7 +904,7 @@ def update_publication(user_id, pub_id):
     update_fields = []
     params = []
 
-    allowed_fields = ['title', 'venue', 'year', 'doi', 'citation_count', 'coauthors']
+    allowed_fields = ['title', 'venue', 'year', 'doi', 'url', 'citation_count', 'coauthors']
     for field in allowed_fields:
         if field in data:
             update_fields.append(f'{field} = ?')
@@ -916,6 +917,7 @@ def update_publication(user_id, pub_id):
     query = f"UPDATE user_publications SET {', '.join(update_fields)} WHERE id = ? AND user_id = ?"
 
     db.execute(query, params)
+    db.commit()  # CRITICAL: Commit the transaction
 
     return jsonify({"status": "updated"})
 
