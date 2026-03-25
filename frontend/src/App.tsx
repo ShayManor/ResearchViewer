@@ -105,23 +105,64 @@ export default function App() {
   }, [drill.level]);
 
   // ── Reading list ───────────────────────────────────────────
-  const addToList = useCallback((id: string) => {
+  const addToList = useCallback(async (id: string) => {
     if (!userId) return;
-    setReadingListIds(prev => new Set(prev).add(id));
-    api.addToReadingList(userId, id).catch(() => setReadingListIds(prev => { const n = new Set(prev); n.delete(id); return n; }));
+    // Optimistic update
+    setReadingListIds(prev => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+
+    try {
+      await api.addToReadingList(userId, id);
+    } catch (err) {
+      // Rollback on error
+      console.error('Failed to add to reading list:', err);
+      setReadingListIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   }, [userId]);
-  const removeFromList = useCallback((id: string) => {
+
+  const removeFromList = useCallback(async (id: string) => {
     if (!userId) return;
-    setReadingListIds(prev => { const n = new Set(prev); n.delete(id); return n; });
-    api.removeFromReadingList(userId, id).catch(() => setReadingListIds(prev => new Set(prev).add(id)));
+    // Optimistic update
+    setReadingListIds(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
+    try {
+      await api.removeFromReadingList(userId, id);
+    } catch (err) {
+      // Rollback on error
+      console.error('Failed to remove from reading list:', err);
+      setReadingListIds(prev => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+    }
   }, [userId]);
-  const markAsRead = useCallback((id: string) => {
+
+  const markAsRead = useCallback(async (id: string) => {
     if (!userId) return;
-    api.markAsRead(userId, id).then(() => {
-      // Optionally remove from reading list after marking as read
-      removeFromList(id);
-    }).catch(err => console.error('Failed to mark as read:', err));
-  }, [userId, removeFromList]);
+    try {
+      await api.markAsRead(userId, id);
+      // Remove from reading list after successfully marking as read
+      setReadingListIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    } catch (err) {
+      console.error('Failed to mark as read:', err);
+    }
+  }, [userId]);
 
   // ── Keyboard shortcut ──────────────────────────────────────
   useEffect(() => {
