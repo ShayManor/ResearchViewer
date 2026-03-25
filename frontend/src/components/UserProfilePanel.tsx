@@ -12,7 +12,7 @@ export function UserProfilePanel({ userId, onClose }: Props) {
   const [pubs, setPubs] = useState<Publication[]>([]);
   const [pubCites, setPubCites] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'reading' | 'publications' | 'settings'>('reading');
+  const [tab, setTab] = useState<'reading' | 'publications' | 'report' | 'settings'>('reading');
   const [authorQ, setAuthorQ] = useState('');
   const [authorRes, setAuthorRes] = useState<{ author_id: string; name: string; h_index?: number; works_count?: number }[]>([]);
   const [searching, setSearching] = useState(false);
@@ -26,6 +26,31 @@ export function UserProfilePanel({ userId, onClose }: Props) {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [editingPubId, setEditingPubId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<Publication>>({});
+  const [reportFilters, setReportFilters] = useState({
+    startDate: '',
+    endDate: '',
+    domain: 'all',
+    topic: 'all'
+  });
+  const [reportSnapshot, setReportSnapshot] = useState<{
+    papers_read: number;
+    total_citations: number;
+    avg_citations: number;
+    reading_list: number;
+    publications: number;
+    pub_citations: number;
+    timestamp: string;
+  } | null>(null);
+  const [previousSnapshot, setPreviousSnapshot] = useState<{
+    papers_read: number;
+    total_citations: number;
+    avg_citations: number;
+    reading_list: number;
+    publications: number;
+    pub_citations: number;
+    timestamp: string;
+  } | null>(null);
+  const [showComparison, setShowComparison] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -156,6 +181,50 @@ export function UserProfilePanel({ userId, onClose }: Props) {
     }
   };
 
+  const generateReport = async () => {
+    setLoading(true);
+    try {
+      // Fetch current user stats
+      const userProfile = await api.getUser(userId);
+
+      // Apply filters to reading_by_microtopic data
+      let filteredReading = userProfile.reading_by_microtopic;
+      if (reportFilters.domain !== 'all') {
+        filteredReading = filteredReading.filter(r => r.domain === reportFilters.domain);
+      }
+      if (reportFilters.topic !== 'all') {
+        filteredReading = filteredReading.filter(r => r.topic === reportFilters.topic);
+      }
+
+      // Calculate filtered stats
+      const filteredPapersRead = filteredReading.reduce((sum, r) => sum + r.count, 0);
+
+      // Create snapshot for comparison
+      const snapshot = {
+        papers_read: filteredPapersRead,
+        total_citations: userProfile.stats.total_citations_covered,
+        avg_citations: userProfile.stats.avg_citations_per_read,
+        reading_list: userProfile.stats.reading_list_count,
+        publications: userProfile.stats.publication_count,
+        pub_citations: userProfile.stats.publication_citations,
+        timestamp: new Date().toISOString()
+      };
+
+      // Store previous snapshot for comparison
+      if (reportSnapshot) {
+        setPreviousSnapshot(reportSnapshot);
+        setShowComparison(true);
+      }
+
+      setReportSnapshot(snapshot);
+      setProfile(userProfile);
+    } catch (err) {
+      console.error('Failed to generate report:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (loading || !profile) return (
     <div className="fixed inset-0 z-50"><div className="fixed inset-0 bg-black/20 backdrop-blur-sm" onClick={onClose} />
       <div className="fixed inset-0 flex items-center justify-center"><Loader2 size={24} className="animate-spin text-gray-400" /></div></div>
@@ -187,7 +256,7 @@ export function UserProfilePanel({ userId, onClose }: Props) {
               <PM label="Pubs" value={String(st.publication_count)} icon={<FileText size={11} />} />
             </div>
             <div className="flex gap-1 mt-4">
-              {(['reading', 'publications', 'settings'] as const).map(t => (
+              {(['reading', 'publications', 'report', 'settings'] as const).map(t => (
                 <button key={t} onClick={() => setTab(t)} className={`flex-1 py-2 rounded-lg text-xs font-medium capitalize ${tab === t ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{t}</button>))}
             </div>
           </div>
@@ -426,6 +495,178 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                 </div></div>
             </div>)}
 
+            {tab === 'report' && (
+              <div className="space-y-6">
+                {/* Header */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-800 mb-1">My Research Report</h3>
+                  <p className="text-xs text-gray-500">
+                    Filter your reading statistics and see how they change over time
+                  </p>
+                </div>
+
+                {/* Filters Section */}
+                <div className="p-4 rounded-xl border border-gray-200 bg-gray-50 space-y-3">
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                    Report Filters
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Date Range */}
+                    <div>
+                      <label className="text-xs text-gray-600 block mb-1">Start Date</label>
+                      <input
+                        type="date"
+                        value={reportFilters.startDate}
+                        onChange={e => setReportFilters({...reportFilters, startDate: e.target.value})}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-blue-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-600 block mb-1">End Date</label>
+                      <input
+                        type="date"
+                        value={reportFilters.endDate}
+                        onChange={e => setReportFilters({...reportFilters, endDate: e.target.value})}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-blue-400"
+                      />
+                    </div>
+
+                    {/* Domain Filter */}
+                    <div>
+                      <label className="text-xs text-gray-600 block mb-1">Domain</label>
+                      <select
+                        value={reportFilters.domain}
+                        onChange={e => setReportFilters({...reportFilters, domain: e.target.value})}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-blue-400"
+                      >
+                        <option value="all">All Domains</option>
+                        {readingByDomainAndTopic.domains.map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Topic Filter (depends on domain) */}
+                    <div>
+                      <label className="text-xs text-gray-600 block mb-1">Topic</label>
+                      <select
+                        value={reportFilters.topic}
+                        onChange={e => setReportFilters({...reportFilters, topic: e.target.value})}
+                        disabled={reportFilters.domain === 'all'}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-blue-400 disabled:bg-gray-100 disabled:text-gray-400"
+                      >
+                        <option value="all">All Topics</option>
+                        {reportFilters.domain !== 'all' &&
+                         readingByDomainAndTopic.byDomain[reportFilters.domain] &&
+                         Object.keys(readingByDomainAndTopic.byDomain[reportFilters.domain]).map(t => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Generate/Refresh Button */}
+                  <button
+                    onClick={generateReport}
+                    disabled={loading}
+                    className="w-full py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>Generating...</span>
+                      </>
+                    ) : reportSnapshot ? (
+                      <>
+                        <BarChart3 size={14} />
+                        <span>Refresh Report</span>
+                      </>
+                    ) : (
+                      <>
+                        <FileText size={14} />
+                        <span>Generate Report</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Report Display */}
+                {reportSnapshot && (
+                  <div className="space-y-4">
+                    {/* Current Report */}
+                    <div className="p-4 rounded-xl border-2 border-blue-200 bg-blue-50">
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-xs font-semibold text-blue-800">
+                          Current Report
+                        </p>
+                        <span className="text-[10px] text-blue-500 font-mono">
+                          {new Date(reportSnapshot.timestamp).toLocaleString()}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3">
+                        <ReportMetric
+                          label="Papers Read"
+                          value={reportSnapshot.papers_read}
+                          previous={previousSnapshot?.papers_read}
+                        />
+                        <ReportMetric
+                          label="Total Cites"
+                          value={reportSnapshot.total_citations}
+                          previous={previousSnapshot?.total_citations}
+                        />
+                        <ReportMetric
+                          label="Avg/Paper"
+                          value={Math.round(reportSnapshot.avg_citations)}
+                          previous={previousSnapshot ? Math.round(previousSnapshot.avg_citations) : undefined}
+                        />
+                        <ReportMetric
+                          label="Reading List"
+                          value={reportSnapshot.reading_list}
+                          previous={previousSnapshot?.reading_list}
+                        />
+                        <ReportMetric
+                          label="Publications"
+                          value={reportSnapshot.publications}
+                          previous={previousSnapshot?.publications}
+                        />
+                        <ReportMetric
+                          label="Pub Cites"
+                          value={reportSnapshot.pub_citations}
+                          previous={previousSnapshot?.pub_citations}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Instructions for Demo */}
+                    <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
+                      <p className="text-xs text-amber-800 font-medium mb-1">
+                        CS348 Demo Instructions
+                      </p>
+                      <ol className="text-xs text-amber-700 space-y-1 ml-4 list-decimal">
+                        <li>Note the current report statistics above</li>
+                        <li>Go to Publications tab and add/edit/delete a publication</li>
+                        <li>Or mark a paper as read from the main interface</li>
+                        <li>Return to this tab and click "Refresh Report"</li>
+                        <li>See the updated statistics with change indicators</li>
+                      </ol>
+                    </div>
+                  </div>
+                )}
+
+                {/* Empty State */}
+                {!reportSnapshot && !loading && (
+                  <div className="text-center py-12">
+                    <BarChart3 size={48} className="mx-auto text-gray-300 mb-3" />
+                    <p className="text-sm text-gray-500">
+                      Click "Generate Report" to see your filtered statistics
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {tab === 'settings' && (<div className="space-y-6">
               <div><p className="text-[10px] font-semibold text-gray-400 uppercase mb-2">Account</p>
                 <div className="space-y-3">
@@ -529,6 +770,39 @@ export function UserProfilePanel({ userId, onClose }: Props) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function ReportMetric({
+  label,
+  value,
+  previous
+}: {
+  label: string;
+  value: number;
+  previous?: number;
+}) {
+  const delta = previous !== undefined ? value - previous : 0;
+  const hasDelta = previous !== undefined && delta !== 0;
+
+  return (
+    <div className="p-2.5 rounded-lg bg-white border border-gray-200">
+      <p className="text-[9px] text-gray-500 uppercase tracking-wide mb-1">
+        {label}
+      </p>
+      <div className="flex items-baseline gap-2">
+        <span className="text-lg font-bold text-gray-800 font-mono">
+          {value.toLocaleString()}
+        </span>
+        {hasDelta && (
+          <span className={`text-[10px] font-semibold ${
+            delta > 0 ? 'text-green-600' : 'text-red-600'
+          }`}>
+            {delta > 0 ? '↑' : '↓'}{Math.abs(delta)}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
