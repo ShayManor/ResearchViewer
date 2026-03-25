@@ -348,57 +348,99 @@ export function UserProfilePanel({ userId, onClose }: Props) {
     ` : '';
 
     // Generate filtered topic chart if filters applied
-    const filteredChartHtml = (reportFilters.domain !== 'all' || reportFilters.topic !== 'all') ? `
-      <h2>${reportFilters.topic !== 'all' ? reportFilters.topic.split('/').pop() : reportFilters.domain} — Filtered View</h2>
-      <div class="chart-container filtered">
-        <div class="filter-note">${reportSnapshot.papers_read} papers in this selection</div>
-        <svg width="100%" height="140" viewBox="0 0 800 140">
-          <line x1="40" y1="0" x2="40" y2="100" stroke="#e5e7eb" stroke-width="1"/>
-          <line x1="40" y1="100" x2="790" y2="100" stroke="#e5e7eb" stroke-width="1"/>
+    let filteredChartHtml = '';
+    if (reportFilters.domain !== 'all' || reportFilters.topic !== 'all') {
+      const topicName = reportFilters.topic !== 'all' ? reportFilters.topic.split('/').pop() : reportFilters.domain;
 
-          ${(() => {
-            const filteredByMonth: Record<string, number> = {};
-            profile.reading_over_time.forEach(m => { filteredByMonth[m.month] = 0; });
+      if (reportSnapshot.papers_read < 3) {
+        // Show simple card for small datasets
+        filteredChartHtml = `
+          <h2>${topicName} — Filtered View</h2>
+          <div class="chart-container filtered">
+            <div style="text-align: center; padding: 20px;">
+              <div style="font-size: 10px; color: #6b7280; margin-bottom: 8px;">Limited data for this filter</div>
+              <div style="font-size: 28px; font-weight: 700; color: #111827; font-family: 'JetBrains Mono', monospace; margin-bottom: 4px;">${reportSnapshot.papers_read}</div>
+              <div style="font-size: 10px; color: #9ca3af;">${reportSnapshot.papers_read === 1 ? 'paper read' : 'papers read'}</div>
+            </div>
+          </div>
+        `;
+      } else {
+        // Show chart for larger datasets
+        filteredChartHtml = `
+          <h2>${topicName} — Filtered View</h2>
+          <div class="chart-container filtered">
+            <div class="filter-note">${reportSnapshot.papers_read} papers in this selection</div>
+            <svg width="100%" height="140" viewBox="0 0 800 140">
+            <line x1="40" y1="0" x2="40" y2="100" stroke="#e5e7eb" stroke-width="1"/>
+            <line x1="40" y1="100" x2="790" y2="100" stroke="#e5e7eb" stroke-width="1"/>
 
-            const totalPapers = profile.reading_over_time.reduce((sum, m) => sum + m.count, 0);
-            profile.reading_over_time.forEach(m => {
-              const proportion = totalPapers > 0 ? m.count / totalPapers : 0;
-              filteredByMonth[m.month] = Math.round(reportSnapshot.papers_read * proportion);
-            });
+            ${(() => {
+              const filteredByMonth: Record<string, number> = {};
+              profile.reading_over_time.forEach(m => { filteredByMonth[m.month] = 0; });
 
-            const months = Object.keys(filteredByMonth);
-            const counts = Object.values(filteredByMonth);
-            const max = Math.max(...counts, 1);
-            const barWidth = 750 / months.length;
-            const yTicks = [max, Math.ceil(max * 0.75), Math.ceil(max * 0.5), Math.ceil(max * 0.25), 0];
+              const totalPapers = profile.reading_over_time.reduce((sum, m) => sum + m.count, 0);
+              let remaining = reportSnapshot.papers_read;
 
-            return yTicks.map((tick, i) => {
-              const y = (i / (yTicks.length - 1)) * 100;
-              return `<text x="35" y="${y + 4}" text-anchor="end" font-size="9" fill="#9ca3af">${tick}</text>`;
-            }).join('') +
-            months.map((month, i) => {
-              const count = counts[i];
-              const height = (count / max) * 100;
-              const isLast = i === months.length - 1;
-              const x = 45 + i * barWidth;
-              return `
-                <rect
-                  x="${x}"
-                  y="${100 - height}"
-                  width="${barWidth - 5}"
-                  height="${Math.max(height, 2)}"
-                  fill="${isLast ? '#6b7280' : '#d1d5db'}"
-                  rx="2"
-                >
-                  <title>${month}: ${count} papers</title>
-                </rect>
-                ${i % 2 === 0 ? `<text x="${x + (barWidth - 5) / 2}" y="120" text-anchor="middle" font-size="8" fill="#9ca3af">${month}</text>` : ''}
-              `;
-            }).join('');
-          })()}
-        </svg>
-      </div>
-    ` : '';
+              // Distribute proportionally
+              profile.reading_over_time.forEach(m => {
+                const proportion = totalPapers > 0 ? m.count / totalPapers : 0;
+                const allocated = Math.floor(reportSnapshot.papers_read * proportion);
+                filteredByMonth[m.month] = allocated;
+                remaining -= allocated;
+              });
+
+              // Distribute remainder
+              const activeMonths = profile.reading_over_time.filter(m => m.count > 0);
+              let idx = activeMonths.length - 1;
+              while (remaining > 0 && idx >= 0) {
+                filteredByMonth[activeMonths[idx].month]++;
+                remaining--;
+                idx--;
+              }
+
+              const months = Object.keys(filteredByMonth);
+              const counts = Object.values(filteredByMonth);
+              const max = Math.max(...counts, 1);
+              const barWidth = 750 / months.length;
+
+              // Generate proper Y-axis ticks
+              const generateTicks = (maxVal: number) => {
+                if (maxVal <= 1) return [1, 0];
+                if (maxVal <= 3) return [maxVal, Math.ceil(maxVal / 2), 0];
+                if (maxVal <= 5) return [maxVal, Math.ceil(maxVal * 0.75), Math.ceil(maxVal * 0.5), Math.ceil(maxVal * 0.25), 0];
+                return [maxVal, Math.ceil(maxVal * 0.75), Math.ceil(maxVal * 0.5), Math.ceil(maxVal * 0.25), 0];
+              };
+              const yTicks = generateTicks(max);
+
+              return yTicks.map((tick, i) => {
+                const y = (i / (yTicks.length - 1)) * 100;
+                return `<text x="35" y="${y + 4}" text-anchor="end" font-size="9" fill="#9ca3af">${tick}</text>`;
+              }).join('') +
+              months.map((month, i) => {
+                const count = counts[i];
+                const height = max > 0 ? (count / max) * 100 : 0;
+                const isLast = i === months.length - 1;
+                const x = 45 + i * barWidth;
+                return count > 0 ? `
+                  <rect
+                    x="${x}"
+                    y="${100 - height}"
+                    width="${barWidth - 5}"
+                    height="${Math.max(height, 2)}"
+                    fill="${isLast ? '#6b7280' : '#d1d5db'}"
+                    rx="2"
+                  >
+                    <title>${month}: ${count} papers</title>
+                  </rect>
+                  ${i % 2 === 0 ? `<text x="${x + (barWidth - 5) / 2}" y="120" text-anchor="middle" font-size="8" fill="#9ca3af">${month}</text>` : ''}
+                ` : '';
+              }).join('');
+            })()}
+            </svg>
+          </div>
+        `;
+      }
+    }
 
     // Generate topic distribution
     const topicDistHtml = profile.reading_by_microtopic.length > 0 ? `
@@ -1071,64 +1113,105 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                         <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
                           {reportFilters.topic !== 'all' ? `${reportFilters.topic.split('/').pop()} Activity` : `${reportFilters.domain} Activity`}
                         </p>
-                        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border-2 border-blue-200 shadow-sm">
-                          <p className="text-xs text-blue-800 font-medium mb-3">
-                            Showing filtered view • {reportSnapshot.papers_read} papers in this selection
-                          </p>
-                          <div className="bg-white rounded-lg p-3 border border-blue-200">
-                            <div className="space-y-2">
-                              {(() => {
-                                // Calculate filtered reading by month
-                                const filteredByMonth: Record<string, number> = {};
-                                profile.reading_over_time.forEach(m => {
-                                  filteredByMonth[m.month] = 0;
-                                });
-
-                                // This is simplified - ideally we'd have date info per microtopic
-                                // For now, distribute filtered papers proportionally across months
-                                const totalPapers = profile.reading_over_time.reduce((sum, m) => sum + m.count, 0);
-                                profile.reading_over_time.forEach(m => {
-                                  const proportion = totalPapers > 0 ? m.count / totalPapers : 0;
-                                  filteredByMonth[m.month] = Math.round(reportSnapshot.papers_read * proportion);
-                                });
-
-                                const months = Object.keys(filteredByMonth);
-                                const counts = Object.values(filteredByMonth);
-                                const max = Math.max(...counts, 1);
-
-                                return (
-                                  <>
-                                    <div className="flex gap-2">
-                                      <div className="flex flex-col justify-between h-20 py-0.5">
-                                        {[max, Math.ceil(max / 2), 0].map((tick, i) => (
-                                          <span key={i} className="text-[8px] text-blue-600 font-mono w-5 text-right">{tick}</span>
-                                        ))}
-                                      </div>
-                                      <div className="flex-1 flex items-end gap-0.5 h-20 border-l border-b border-blue-300 rounded-bl">
-                                        {months.map((month, i) => {
-                                          const count = counts[i];
-                                          const heightPx = Math.max((count / max) * 80, count > 0 ? 3 : 1);
-                                          const isLast = i === months.length - 1;
-                                          return (
-                                            <div key={month} className="flex-1 flex flex-col items-center justify-end" title={`${month}: ${count} papers`}>
-                                              <div className="w-full rounded-t" style={{
-                                                height: `${heightPx}px`,
-                                                backgroundColor: isLast ? '#2563eb' : '#60a5fa'
-                                              }} />
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    </div>
-                                    <div className="flex justify-between mt-1 ml-7 text-[7px] text-blue-600 font-mono">
-                                      <span>{months[0]}</span>
-                                      <span>{months[months.length - 1]}</span>
-                                    </div>
-                                  </>
-                                );
-                              })()}
-                            </div>
+                        <div className="bg-gray-50 rounded-xl p-4 border border-gray-200 shadow-sm">
+                          <div className="flex items-center justify-between mb-3">
+                            <p className="text-xs text-gray-700 font-medium">
+                              Filtered View
+                            </p>
+                            <span className="px-2 py-0.5 rounded-md bg-gray-700 text-white text-[10px] font-semibold">
+                              {reportSnapshot.papers_read} {reportSnapshot.papers_read === 1 ? 'paper' : 'papers'}
+                            </span>
                           </div>
+                          {reportSnapshot.papers_read < 3 ? (
+                            <div className="bg-white rounded-lg p-4 border border-gray-200 text-center">
+                              <p className="text-xs text-gray-500 mb-2">
+                                Limited data for this filter
+                              </p>
+                              <p className="text-2xl font-bold text-gray-800 font-mono">
+                                {reportSnapshot.papers_read}
+                              </p>
+                              <p className="text-[10px] text-gray-400 mt-1">
+                                {reportSnapshot.papers_read === 1 ? 'paper read' : 'papers read'}
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="bg-white rounded-lg p-3 border border-gray-200">
+                              <div className="space-y-2">
+                                {(() => {
+                                  // Calculate filtered reading by month with better distribution
+                                  const filteredByMonth: Record<string, number> = {};
+                                  profile.reading_over_time.forEach(m => {
+                                    filteredByMonth[m.month] = 0;
+                                  });
+
+                                  // Distribute papers proportionally, but ensure at least some are shown
+                                  const totalPapers = profile.reading_over_time.reduce((sum, m) => sum + m.count, 0);
+                                  let remaining = reportSnapshot.papers_read;
+
+                                  // First pass: distribute proportionally
+                                  profile.reading_over_time.forEach((m, idx) => {
+                                    const proportion = totalPapers > 0 ? m.count / totalPapers : 0;
+                                    const allocated = Math.floor(reportSnapshot.papers_read * proportion);
+                                    filteredByMonth[m.month] = allocated;
+                                    remaining -= allocated;
+                                  });
+
+                                  // Second pass: distribute remainder to months with activity
+                                  const activeMonths = profile.reading_over_time.filter(m => m.count > 0);
+                                  let idx = activeMonths.length - 1;
+                                  while (remaining > 0 && idx >= 0) {
+                                    filteredByMonth[activeMonths[idx].month]++;
+                                    remaining--;
+                                    idx--;
+                                  }
+
+                                  const months = Object.keys(filteredByMonth);
+                                  const counts = Object.values(filteredByMonth);
+                                  const max = Math.max(...counts, 1);
+
+                                  // Generate proper Y-axis ticks
+                                  const generateTicks = (maxVal: number) => {
+                                    if (maxVal <= 1) return [1, 0];
+                                    if (maxVal <= 3) return [maxVal, Math.ceil(maxVal / 2), 0];
+                                    if (maxVal <= 5) return [maxVal, Math.ceil(maxVal * 0.75), Math.ceil(maxVal * 0.5), Math.ceil(maxVal * 0.25), 0];
+                                    return [maxVal, Math.ceil(maxVal * 0.75), Math.ceil(maxVal * 0.5), Math.ceil(maxVal * 0.25), 0];
+                                  };
+                                  const yTicks = generateTicks(max);
+
+                                  return (
+                                    <>
+                                      <div className="flex gap-2">
+                                        <div className="flex flex-col justify-between h-20 py-0.5">
+                                          {yTicks.map((tick, i) => (
+                                            <span key={i} className="text-[8px] text-gray-500 font-mono w-5 text-right">{tick}</span>
+                                          ))}
+                                        </div>
+                                        <div className="flex-1 flex items-end gap-0.5 h-20 border-l border-b border-gray-200 rounded-bl">
+                                          {months.map((month, i) => {
+                                            const count = counts[i];
+                                            const heightPx = max > 0 ? Math.max((count / max) * 80, count > 0 ? 3 : 1) : 1;
+                                            const isLast = i === months.length - 1;
+                                            return (
+                                              <div key={month} className="flex-1 flex flex-col items-center justify-end" title={`${month}: ${count} papers`}>
+                                                <div className="w-full rounded-t" style={{
+                                                  height: `${heightPx}px`,
+                                                  backgroundColor: count > 0 ? (isLast ? '#4b5563' : '#9ca3af') : 'transparent'
+                                                }} />
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                      <div className="flex justify-between mt-1 ml-7 text-[7px] text-gray-400 font-mono">
+                                        <span>{months[0]}</span>
+                                        <span>{months[months.length - 1]}</span>
+                                      </div>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
