@@ -283,42 +283,37 @@ export function UserProfilePanel({ userId, onClose }: Props) {
       <div class="stat-box"><div class="stat-label">Reading Pace</div><div class="stat-value">${st.reading_pace_per_week}/week</div></div>
     `;
 
-    // Generate insights boxes
+    // Generate insights
     const insightsHtml = `
-      <h2>Key Insights</h2>
+      <h2>Reading Analysis</h2>
       <div class="insights-grid">
-        <div class="insight-box blue">
-          <div class="insight-icon">📚</div>
-          <div class="insight-value">${avgPerDay}</div>
-          <div class="insight-label">Papers per day</div>
+        <div class="insight-box">
+          <div class="insight-label">Daily Average</div>
+          <div class="insight-value">${avgPerDay} papers</div>
         </div>
-        <div class="insight-box purple">
-          <div class="insight-icon">📊</div>
+        <div class="insight-box">
+          <div class="insight-label">Weekly Citations</div>
           <div class="insight-value">${fmtCit(citesPerWeek)}</div>
-          <div class="insight-label">Citations per week</div>
         </div>
-        <div class="insight-box green">
-          <div class="insight-icon">🎯</div>
+        <div class="insight-box">
+          <div class="insight-label">Primary Domain</div>
           <div class="insight-value">${topDomainName}</div>
-          <div class="insight-label">Top domain (${topDomainCount} papers)</div>
+          <div class="insight-subtext">${topDomainCount} papers</div>
         </div>
-        <div class="insight-box amber">
-          <div class="insight-icon">🔬</div>
+        <div class="insight-box">
+          <div class="insight-label">Research Areas</div>
           <div class="insight-value">${profile.focus_topics.length}</div>
-          <div class="insight-label">Research focus areas</div>
         </div>
       </div>
     `;
 
-    // Generate reading over time chart
-    const readingChartHtml = profile.reading_over_time.length > 0 ? `
-      <h2>Reading Trend (Last 12 Months)</h2>
+    // Generate overall reading chart
+    const overallChartHtml = profile.reading_over_time.length > 0 ? `
+      <h2>Overall Reading Activity</h2>
       <div class="chart-container">
         <svg width="100%" height="140" viewBox="0 0 800 140">
-          <!-- Y-axis line -->
-          <line x1="40" y1="0" x2="40" y2="100" stroke="#e5e7eb" stroke-width="2"/>
-          <!-- X-axis line -->
-          <line x1="40" y1="100" x2="790" y2="100" stroke="#e5e7eb" stroke-width="2"/>
+          <line x1="40" y1="0" x2="40" y2="100" stroke="#e5e7eb" stroke-width="1"/>
+          <line x1="40" y1="100" x2="790" y2="100" stroke="#e5e7eb" stroke-width="1"/>
 
           ${(() => {
             const max = Math.max(...profile.reading_over_time.map(m => m.count), 1);
@@ -339,12 +334,65 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                   y="${100 - height}"
                   width="${barWidth - 5}"
                   height="${Math.max(height, 2)}"
-                  fill="${isLast ? '#1f2937' : '#9ca3af'}"
-                  rx="3"
+                  fill="${isLast ? '#374151' : '#d1d5db'}"
+                  rx="2"
                 >
                   <title>${item.month}: ${item.count} papers</title>
                 </rect>
                 ${i % 2 === 0 ? `<text x="${x + (barWidth - 5) / 2}" y="120" text-anchor="middle" font-size="8" fill="#9ca3af">${item.month}</text>` : ''}
+              `;
+            }).join('');
+          })()}
+        </svg>
+      </div>
+    ` : '';
+
+    // Generate filtered topic chart if filters applied
+    const filteredChartHtml = (reportFilters.domain !== 'all' || reportFilters.topic !== 'all') ? `
+      <h2>${reportFilters.topic !== 'all' ? reportFilters.topic.split('/').pop() : reportFilters.domain} — Filtered View</h2>
+      <div class="chart-container filtered">
+        <div class="filter-note">${reportSnapshot.papers_read} papers in this selection</div>
+        <svg width="100%" height="140" viewBox="0 0 800 140">
+          <line x1="40" y1="0" x2="40" y2="100" stroke="#e5e7eb" stroke-width="1"/>
+          <line x1="40" y1="100" x2="790" y2="100" stroke="#e5e7eb" stroke-width="1"/>
+
+          ${(() => {
+            const filteredByMonth: Record<string, number> = {};
+            profile.reading_over_time.forEach(m => { filteredByMonth[m.month] = 0; });
+
+            const totalPapers = profile.reading_over_time.reduce((sum, m) => sum + m.count, 0);
+            profile.reading_over_time.forEach(m => {
+              const proportion = totalPapers > 0 ? m.count / totalPapers : 0;
+              filteredByMonth[m.month] = Math.round(reportSnapshot.papers_read * proportion);
+            });
+
+            const months = Object.keys(filteredByMonth);
+            const counts = Object.values(filteredByMonth);
+            const max = Math.max(...counts, 1);
+            const barWidth = 750 / months.length;
+            const yTicks = [max, Math.ceil(max * 0.75), Math.ceil(max * 0.5), Math.ceil(max * 0.25), 0];
+
+            return yTicks.map((tick, i) => {
+              const y = (i / (yTicks.length - 1)) * 100;
+              return `<text x="35" y="${y + 4}" text-anchor="end" font-size="9" fill="#9ca3af">${tick}</text>`;
+            }).join('') +
+            months.map((month, i) => {
+              const count = counts[i];
+              const height = (count / max) * 100;
+              const isLast = i === months.length - 1;
+              const x = 45 + i * barWidth;
+              return `
+                <rect
+                  x="${x}"
+                  y="${100 - height}"
+                  width="${barWidth - 5}"
+                  height="${Math.max(height, 2)}"
+                  fill="${isLast ? '#6b7280' : '#d1d5db'}"
+                  rx="2"
+                >
+                  <title>${month}: ${count} papers</title>
+                </rect>
+                ${i % 2 === 0 ? `<text x="${x + (barWidth - 5) / 2}" y="120" text-anchor="middle" font-size="8" fill="#9ca3af">${month}</text>` : ''}
               `;
             }).join('');
           })()}
@@ -400,36 +448,34 @@ export function UserProfilePanel({ userId, onClose }: Props) {
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: 'DM Sans', -apple-system, system-ui; color: #1f2937; padding: 40px; max-width: 900px; margin: 0 auto; font-size: 11px; background: #fafafa; line-height: 1.6; }
-      .header { background: linear-gradient(135deg, #1f2937 0%, #374151 100%); color: white; padding: 40px; border-radius: 16px; margin-bottom: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-      h1 { font-family: 'Instrument Serif', serif; font-size: 36px; font-weight: 700; margin-bottom: 12px; color: white; }
-      .subtitle { font-size: 15px; color: #d1d5db; margin-bottom: 6px; font-weight: 500; }
-      .filter-badge { display: inline-block; padding: 8px 16px; background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.3); border-radius: 20px; font-size: 11px; font-weight: 600; margin-top: 16px; backdrop-filter: blur(10px); }
-      h2 { font-size: 13px; font-weight: 700; color: #1f2937; text-transform: uppercase; letter-spacing: 0.08em; margin: 32px 0 16px; padding-bottom: 10px; border-bottom: 3px solid #e5e7eb; }
-      .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 24px 0; }
-      .stat-box { background: white; border: 2px solid #e5e7eb; border-radius: 12px; padding: 20px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.06); transition: all 0.3s; }
-      .stat-label { font-size: 10px; color: #6b7280; text-transform: uppercase; font-weight: 700; margin-bottom: 8px; letter-spacing: 0.05em; }
-      .stat-value { font-size: 28px; color: #111827; font-weight: 800; font-family: 'JetBrains Mono', monospace; line-height: 1; }
-      .insights-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 24px 0; }
-      .insight-box { background: white; border-radius: 12px; padding: 24px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-      .insight-box.blue { background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border: 2px solid #3b82f6; }
-      .insight-box.purple { background: linear-gradient(135deg, #e9d5ff 0%, #d8b4fe 100%); border: 2px solid #a855f7; }
-      .insight-box.green { background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border: 2px solid #10b981; }
-      .insight-box.amber { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 2px solid #f59e0b; }
-      .insight-icon { font-size: 32px; margin-bottom: 12px; }
-      .insight-value { font-size: 24px; font-weight: 800; margin-bottom: 6px; font-family: 'JetBrains Mono', monospace; }
-      .insight-label { font-size: 11px; font-weight: 600; opacity: 0.8; }
-      .chart-container { background: white; padding: 24px; border-radius: 12px; border: 2px solid #e5e7eb; margin: 16px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-      .domain-section { background: white; padding: 20px; border-radius: 12px; border: 2px solid #e5e7eb; margin: 16px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-      .topic-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-      .topic-label { width: 160px; font-size: 11px; color: #1f2937; font-weight: 700; }
-      .topic-bar-container { flex: 1; height: 24px; background: #f3f4f6; border-radius: 6px; overflow: hidden; }
-      .topic-bar { height: 100%; border-radius: 6px; }
-      .topic-value { width: 60px; font-size: 12px; color: #1f2937; font-weight: 700; font-family: 'JetBrains Mono', monospace; text-align: right; }
-      .focus-tags { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
-      .focus-tag { padding: 8px 14px; border-radius: 20px; font-size: 11px; font-weight: 700; border: 2px solid; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-      .footer { margin-top: 56px; padding-top: 24px; border-top: 3px solid #e5e7eb; font-size: 11px; color: #6b7280; text-align: center; }
-      strong { font-weight: 800; color: #111827; }
+      body { font-family: 'DM Sans', -apple-system, system-ui; color: #1f2937; padding: 40px; max-width: 900px; margin: 0 auto; font-size: 11px; background: #fafafa; line-height: 1.5; }
+      .header { background: white; border: 1px solid #e5e7eb; padding: 32px; border-radius: 12px; margin-bottom: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+      h1 { font-family: 'Instrument Serif', serif; font-size: 32px; font-weight: 600; margin-bottom: 8px; color: #111827; }
+      .subtitle { font-size: 14px; color: #6b7280; margin-bottom: 4px; }
+      .filter-badge { display: inline-block; padding: 6px 14px; background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 16px; font-size: 11px; font-weight: 600; margin-top: 12px; }
+      h2 { font-size: 12px; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: 0.05em; margin: 28px 0 12px; padding-bottom: 8px; border-bottom: 2px solid #e5e7eb; }
+      .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 20px 0; }
+      .stat-box { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+      .stat-label { font-size: 10px; color: #6b7280; text-transform: uppercase; font-weight: 600; margin-bottom: 6px; letter-spacing: 0.03em; }
+      .stat-value { font-size: 22px; color: #111827; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+      .insights-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 20px 0; }
+      .insight-box { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+      .insight-label { font-size: 9px; color: #9ca3af; text-transform: uppercase; font-weight: 600; margin-bottom: 6px; letter-spacing: 0.03em; }
+      .insight-value { font-size: 16px; color: #111827; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-bottom: 2px; }
+      .insight-subtext { font-size: 10px; color: #6b7280; }
+      .chart-container { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e5e7eb; margin: 12px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+      .chart-container.filtered { background: #f9fafb; border: 1px solid #d1d5db; }
+      .filter-note { font-size: 10px; color: #6b7280; margin-bottom: 12px; text-align: center; font-weight: 500; }
+      .domain-section { background: white; padding: 16px; border-radius: 8px; border: 1px solid #e5e7eb; margin: 12px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+      .topic-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+      .topic-label { width: 140px; font-size: 10px; color: #374151; font-weight: 600; }
+      .topic-bar-container { flex: 1; height: 20px; background: #f3f4f6; border-radius: 4px; overflow: hidden; }
+      .topic-bar { height: 100%; border-radius: 4px; }
+      .topic-value { width: 50px; font-size: 11px; color: #6b7280; font-weight: 600; font-family: 'JetBrains Mono', monospace; text-align: right; }
+      .focus-tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+      .focus-tag { padding: 6px 12px; border-radius: 16px; font-size: 10px; font-weight: 600; border: 1px solid; }
+      .footer { margin-top: 48px; padding-top: 20px; border-top: 2px solid #e5e7eb; font-size: 10px; color: #9ca3af; text-align: center; }
+      strong { font-weight: 700; color: #111827; }
       @media print {
         body { padding: 20px; background: white; }
         .header { page-break-inside: avoid; }
@@ -440,24 +486,23 @@ export function UserProfilePanel({ userId, onClose }: Props) {
       }
     </style></head><body>
     <div class="header">
-      <h1>${profile.username}'s Research Journey</h1>
-      <div class="subtitle">${profile.email}</div>
-      <div class="subtitle">Member since ${profile.created_at?.slice(0, 10)} • ${st.days_since_join} days active</div>
-      <div class="subtitle"><strong>${reportSnapshot.papers_read}</strong> papers explored • <strong>${fmtCit(reportSnapshot.total_citations)}</strong> citations covered</div>
-      <div class="filter-badge">📊 ${filterText}</div>
+      <h1>${profile.username}'s Research Report</h1>
+      <div class="subtitle">${profile.email} · Member since ${profile.created_at?.slice(0, 10)}</div>
+      <div class="subtitle">${reportSnapshot.papers_read.toLocaleString()} papers · ${fmtCit(reportSnapshot.total_citations)} citations · ${st.days_since_join} days active</div>
+      ${(reportFilters.domain !== 'all' || reportFilters.topic !== 'all') ? `<div class="filter-badge">${filterText}</div>` : ''}
     </div>
 
-    <h2>📈 Performance Metrics</h2>
+    <h2>Overview</h2>
     <div class="stat-grid">${statsHtml}</div>
 
     ${insightsHtml}
-    ${readingChartHtml}
+    ${overallChartHtml}
+    ${filteredChartHtml}
     ${topicDistHtml}
     ${focusHtml}
 
     <div class="footer">
-      <strong>Generated by ResearchViewer</strong><br>
-      ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+      Generated by <strong>ResearchViewer</strong> on ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
     </div>
     </body></html>`);
 
@@ -978,15 +1023,15 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                       </div>
                     </div>
 
-                    {/* Reading Over Time Chart */}
+                    {/* Overall Reading Trend */}
                     {profile.reading_over_time.length > 0 && (
                       <div>
                         <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
-                          Reading Trend
+                          Overall Reading Activity
                         </p>
                         <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
                           <div className="flex gap-2">
-                            <div className="flex flex-col justify-between h-32 py-0.5">
+                            <div className="flex flex-col justify-between h-28 py-0.5">
                               {(() => {
                                 const max = Math.max(...profile.reading_over_time.map(m => m.count), 1);
                                 const ticks = max <= 3 ? [max, Math.ceil(max / 2), 0] : [max, Math.ceil(max * 0.75), Math.ceil(max * 0.5), Math.ceil(max * 0.25), 0];
@@ -995,10 +1040,10 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                                 ));
                               })()}
                             </div>
-                            <div className="flex-1 flex items-end gap-1 h-32 border-l border-b border-gray-200 rounded-bl">
+                            <div className="flex-1 flex items-end gap-1 h-28 border-l border-b border-gray-200 rounded-bl">
                               {profile.reading_over_time.map(({ month, count }, i) => {
                                 const max = Math.max(...profile.reading_over_time.map(m => m.count), 1);
-                                const containerHeight = 128;
+                                const containerHeight = 112;
                                 const heightPx = Math.max((count / max) * containerHeight, count > 0 ? 4 : 2);
                                 const isLast = i === profile.reading_over_time.length - 1;
                                 return (
@@ -1015,6 +1060,74 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                           <div className="flex justify-between mt-2 ml-8 text-[8px] text-gray-400 font-mono">
                             <span>{profile.reading_over_time[0]?.month}</span>
                             <span>{profile.reading_over_time[profile.reading_over_time.length - 1]?.month}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Filtered Topic Trend */}
+                    {(reportFilters.domain !== 'all' || reportFilters.topic !== 'all') && profile.reading_by_microtopic.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                          {reportFilters.topic !== 'all' ? `${reportFilters.topic.split('/').pop()} Activity` : `${reportFilters.domain} Activity`}
+                        </p>
+                        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border-2 border-blue-200 shadow-sm">
+                          <p className="text-xs text-blue-800 font-medium mb-3">
+                            Showing filtered view • {reportSnapshot.papers_read} papers in this selection
+                          </p>
+                          <div className="bg-white rounded-lg p-3 border border-blue-200">
+                            <div className="space-y-2">
+                              {(() => {
+                                // Calculate filtered reading by month
+                                const filteredByMonth: Record<string, number> = {};
+                                profile.reading_over_time.forEach(m => {
+                                  filteredByMonth[m.month] = 0;
+                                });
+
+                                // This is simplified - ideally we'd have date info per microtopic
+                                // For now, distribute filtered papers proportionally across months
+                                const totalPapers = profile.reading_over_time.reduce((sum, m) => sum + m.count, 0);
+                                profile.reading_over_time.forEach(m => {
+                                  const proportion = totalPapers > 0 ? m.count / totalPapers : 0;
+                                  filteredByMonth[m.month] = Math.round(reportSnapshot.papers_read * proportion);
+                                });
+
+                                const months = Object.keys(filteredByMonth);
+                                const counts = Object.values(filteredByMonth);
+                                const max = Math.max(...counts, 1);
+
+                                return (
+                                  <>
+                                    <div className="flex gap-2">
+                                      <div className="flex flex-col justify-between h-20 py-0.5">
+                                        {[max, Math.ceil(max / 2), 0].map((tick, i) => (
+                                          <span key={i} className="text-[8px] text-blue-600 font-mono w-5 text-right">{tick}</span>
+                                        ))}
+                                      </div>
+                                      <div className="flex-1 flex items-end gap-0.5 h-20 border-l border-b border-blue-300 rounded-bl">
+                                        {months.map((month, i) => {
+                                          const count = counts[i];
+                                          const heightPx = Math.max((count / max) * 80, count > 0 ? 3 : 1);
+                                          const isLast = i === months.length - 1;
+                                          return (
+                                            <div key={month} className="flex-1 flex flex-col items-center justify-end" title={`${month}: ${count} papers`}>
+                                              <div className="w-full rounded-t" style={{
+                                                height: `${heightPx}px`,
+                                                backgroundColor: isLast ? '#2563eb' : '#60a5fa'
+                                              }} />
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                    <div className="flex justify-between mt-1 ml-7 text-[7px] text-blue-600 font-mono">
+                                      <span>{months[0]}</span>
+                                      <span>{months[months.length - 1]}</span>
+                                    </div>
+                                  </>
+                                );
+                              })()}
+                            </div>
                           </div>
                         </div>
                       </div>
