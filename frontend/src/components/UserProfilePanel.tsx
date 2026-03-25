@@ -267,48 +267,88 @@ export function UserProfilePanel({ userId, onClose }: Props) {
       ? `${reportFilters.domain}${reportFilters.topic !== 'all' ? ` · ${reportFilters.topic}` : ''}`
       : 'All Topics';
 
+    // Calculate insights
+    const totalDays = st.days_since_join;
+    const avgPerDay = totalDays > 0 ? (reportSnapshot.papers_read / totalDays).toFixed(1) : '0';
+    const citesPerWeek = st.reading_pace_per_week * Math.round(reportSnapshot.avg_citations);
+    const topDomain = Object.entries(readingByDomainAndTopic.byDomain)[0];
+    const topDomainName = topDomain ? topDomain[0] : 'N/A';
+    const topDomainCount = topDomain ? Object.values(topDomain[1]).reduce((sum, mics) => sum + mics.reduce((s: number, m: any) => s + m.count, 0), 0) : 0;
+
     // Generate overview stats
     const statsHtml = `
       <div class="stat-box"><div class="stat-label">Papers Read</div><div class="stat-value">${reportSnapshot.papers_read}</div></div>
-      <div class="stat-box"><div class="stat-label">Total Cites</div><div class="stat-value">${fmtCit(reportSnapshot.total_citations)}</div></div>
+      <div class="stat-box"><div class="stat-label">Total Citations</div><div class="stat-value">${fmtCit(reportSnapshot.total_citations)}</div></div>
       <div class="stat-box"><div class="stat-label">Avg/Paper</div><div class="stat-value">${fmtCit(Math.round(reportSnapshot.avg_citations))}</div></div>
-      <div class="stat-box"><div class="stat-label">Reading List</div><div class="stat-value">${reportSnapshot.reading_list}</div></div>
-      <div class="stat-box"><div class="stat-label">Publications</div><div class="stat-value">${reportSnapshot.publications}</div></div>
-      <div class="stat-box"><div class="stat-label">Pub Cites</div><div class="stat-value">${fmtCit(reportSnapshot.pub_citations)}</div></div>
-      <div class="stat-box"><div class="stat-label">Reading Pace</div><div class="stat-value">${st.reading_pace_per_week}/wk</div></div>
-      <div class="stat-box"><div class="stat-label">Days Active</div><div class="stat-value">${st.days_since_join}</div></div>
+      <div class="stat-box"><div class="stat-label">Reading Pace</div><div class="stat-value">${st.reading_pace_per_week}/week</div></div>
+    `;
+
+    // Generate insights boxes
+    const insightsHtml = `
+      <h2>Key Insights</h2>
+      <div class="insights-grid">
+        <div class="insight-box blue">
+          <div class="insight-icon">📚</div>
+          <div class="insight-value">${avgPerDay}</div>
+          <div class="insight-label">Papers per day</div>
+        </div>
+        <div class="insight-box purple">
+          <div class="insight-icon">📊</div>
+          <div class="insight-value">${fmtCit(citesPerWeek)}</div>
+          <div class="insight-label">Citations per week</div>
+        </div>
+        <div class="insight-box green">
+          <div class="insight-icon">🎯</div>
+          <div class="insight-value">${topDomainName}</div>
+          <div class="insight-label">Top domain (${topDomainCount} papers)</div>
+        </div>
+        <div class="insight-box amber">
+          <div class="insight-icon">🔬</div>
+          <div class="insight-value">${profile.focus_topics.length}</div>
+          <div class="insight-label">Research focus areas</div>
+        </div>
+      </div>
     `;
 
     // Generate reading over time chart
     const readingChartHtml = profile.reading_over_time.length > 0 ? `
-      <h2>Reading Activity Over Time</h2>
+      <h2>Reading Trend (Last 12 Months)</h2>
       <div class="chart-container">
-        <svg width="100%" height="120" viewBox="0 0 800 120" preserveAspectRatio="none">
+        <svg width="100%" height="140" viewBox="0 0 800 140">
+          <!-- Y-axis line -->
+          <line x1="40" y1="0" x2="40" y2="100" stroke="#e5e7eb" stroke-width="2"/>
+          <!-- X-axis line -->
+          <line x1="40" y1="100" x2="790" y2="100" stroke="#e5e7eb" stroke-width="2"/>
+
           ${(() => {
             const max = Math.max(...profile.reading_over_time.map(m => m.count), 1);
-            const barWidth = 800 / profile.reading_over_time.length;
-            return profile.reading_over_time.map((item, i) => {
+            const barWidth = 750 / profile.reading_over_time.length;
+            const yTicks = [max, Math.ceil(max * 0.75), Math.ceil(max * 0.5), Math.ceil(max * 0.25), 0];
+
+            return yTicks.map((tick, i) => {
+              const y = (i / (yTicks.length - 1)) * 100;
+              return `<text x="35" y="${y + 4}" text-anchor="end" font-size="9" fill="#9ca3af">${tick}</text>`;
+            }).join('') +
+            profile.reading_over_time.map((item, i) => {
               const height = (item.count / max) * 100;
               const isLast = i === profile.reading_over_time.length - 1;
+              const x = 45 + i * barWidth;
               return `
                 <rect
-                  x="${i * barWidth + 2}"
+                  x="${x}"
                   y="${100 - height}"
-                  width="${barWidth - 4}"
+                  width="${barWidth - 5}"
                   height="${Math.max(height, 2)}"
-                  fill="${isLast ? '#374151' : '#9ca3af'}"
-                  rx="2"
+                  fill="${isLast ? '#1f2937' : '#9ca3af'}"
+                  rx="3"
                 >
                   <title>${item.month}: ${item.count} papers</title>
                 </rect>
+                ${i % 2 === 0 ? `<text x="${x + (barWidth - 5) / 2}" y="120" text-anchor="middle" font-size="8" fill="#9ca3af">${item.month}</text>` : ''}
               `;
             }).join('');
           })()}
         </svg>
-        <div class="chart-labels">
-          <span>${profile.reading_over_time[0]?.month || ''}</span>
-          <span>${profile.reading_over_time[profile.reading_over_time.length - 1]?.month || ''}</span>
-        </div>
       </div>
     ` : '';
 
@@ -360,53 +400,64 @@ export function UserProfilePanel({ userId, onClose }: Props) {
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: 'DM Sans', -apple-system, system-ui; color: #1f2937; padding: 40px; max-width: 900px; margin: 0 auto; font-size: 11px; background: #fafafa; line-height: 1.5; }
-      .header { background: white; border: 1px solid #e5e7eb; padding: 32px; border-radius: 12px; margin-bottom: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-      h1 { font-family: 'Instrument Serif', serif; font-size: 32px; font-weight: 600; margin-bottom: 8px; color: #111827; }
-      .subtitle { font-size: 14px; color: #6b7280; margin-bottom: 4px; }
-      .filter-badge { display: inline-block; padding: 6px 14px; background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 16px; font-size: 11px; font-weight: 600; margin-top: 12px; }
-      h2 { font-size: 12px; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: 0.05em; margin: 28px 0 12px; padding-bottom: 8px; border-bottom: 2px solid #e5e7eb; }
-      h3 { font-size: 11px; font-weight: 700; color: #4b5563; text-transform: uppercase; letter-spacing: 0.03em; margin: 16px 0 8px; }
-      .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 20px 0; }
-      .stat-box { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-      .stat-label { font-size: 10px; color: #6b7280; text-transform: uppercase; font-weight: 600; margin-bottom: 6px; letter-spacing: 0.03em; }
-      .stat-value { font-size: 22px; color: #111827; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
-      .chart-container { background: white; padding: 20px; border-radius: 8px; border: 1px solid #e5e7eb; margin: 12px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-      .chart-labels { display: flex; justify-content: space-between; margin-top: 8px; font-size: 9px; color: #9ca3af; font-family: 'JetBrains Mono', monospace; }
-      .domain-section { background: white; padding: 16px; border-radius: 8px; border: 1px solid #e5e7eb; margin: 12px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-      .topic-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
-      .topic-label { width: 140px; font-size: 10px; color: #374151; font-weight: 600; }
-      .topic-bar-container { flex: 1; height: 20px; background: #f3f4f6; border-radius: 4px; overflow: hidden; }
-      .topic-bar { height: 100%; border-radius: 4px; }
-      .topic-value { width: 50px; font-size: 11px; color: #6b7280; font-weight: 600; font-family: 'JetBrains Mono', monospace; text-align: right; }
-      .focus-tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-      .focus-tag { padding: 6px 12px; border-radius: 16px; font-size: 10px; font-weight: 600; border: 1px solid; }
-      .footer { margin-top: 48px; padding-top: 20px; border-top: 2px solid #e5e7eb; font-size: 10px; color: #9ca3af; text-align: center; }
-      strong { font-weight: 700; color: #111827; }
+      body { font-family: 'DM Sans', -apple-system, system-ui; color: #1f2937; padding: 40px; max-width: 900px; margin: 0 auto; font-size: 11px; background: #fafafa; line-height: 1.6; }
+      .header { background: linear-gradient(135deg, #1f2937 0%, #374151 100%); color: white; padding: 40px; border-radius: 16px; margin-bottom: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+      h1 { font-family: 'Instrument Serif', serif; font-size: 36px; font-weight: 700; margin-bottom: 12px; color: white; }
+      .subtitle { font-size: 15px; color: #d1d5db; margin-bottom: 6px; font-weight: 500; }
+      .filter-badge { display: inline-block; padding: 8px 16px; background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.3); border-radius: 20px; font-size: 11px; font-weight: 600; margin-top: 16px; backdrop-filter: blur(10px); }
+      h2 { font-size: 13px; font-weight: 700; color: #1f2937; text-transform: uppercase; letter-spacing: 0.08em; margin: 32px 0 16px; padding-bottom: 10px; border-bottom: 3px solid #e5e7eb; }
+      .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 24px 0; }
+      .stat-box { background: white; border: 2px solid #e5e7eb; border-radius: 12px; padding: 20px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.06); transition: all 0.3s; }
+      .stat-label { font-size: 10px; color: #6b7280; text-transform: uppercase; font-weight: 700; margin-bottom: 8px; letter-spacing: 0.05em; }
+      .stat-value { font-size: 28px; color: #111827; font-weight: 800; font-family: 'JetBrains Mono', monospace; line-height: 1; }
+      .insights-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 24px 0; }
+      .insight-box { background: white; border-radius: 12px; padding: 24px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+      .insight-box.blue { background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border: 2px solid #3b82f6; }
+      .insight-box.purple { background: linear-gradient(135deg, #e9d5ff 0%, #d8b4fe 100%); border: 2px solid #a855f7; }
+      .insight-box.green { background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border: 2px solid #10b981; }
+      .insight-box.amber { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 2px solid #f59e0b; }
+      .insight-icon { font-size: 32px; margin-bottom: 12px; }
+      .insight-value { font-size: 24px; font-weight: 800; margin-bottom: 6px; font-family: 'JetBrains Mono', monospace; }
+      .insight-label { font-size: 11px; font-weight: 600; opacity: 0.8; }
+      .chart-container { background: white; padding: 24px; border-radius: 12px; border: 2px solid #e5e7eb; margin: 16px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+      .domain-section { background: white; padding: 20px; border-radius: 12px; border: 2px solid #e5e7eb; margin: 16px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+      .topic-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+      .topic-label { width: 160px; font-size: 11px; color: #1f2937; font-weight: 700; }
+      .topic-bar-container { flex: 1; height: 24px; background: #f3f4f6; border-radius: 6px; overflow: hidden; }
+      .topic-bar { height: 100%; border-radius: 6px; }
+      .topic-value { width: 60px; font-size: 12px; color: #1f2937; font-weight: 700; font-family: 'JetBrains Mono', monospace; text-align: right; }
+      .focus-tags { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+      .focus-tag { padding: 8px 14px; border-radius: 20px; font-size: 11px; font-weight: 700; border: 2px solid; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+      .footer { margin-top: 56px; padding-top: 24px; border-top: 3px solid #e5e7eb; font-size: 11px; color: #6b7280; text-align: center; }
+      strong { font-weight: 800; color: #111827; }
       @media print {
         body { padding: 20px; background: white; }
         .header { page-break-inside: avoid; }
         .stat-grid { page-break-inside: avoid; }
+        .insights-grid { page-break-inside: avoid; }
         .chart-container { page-break-inside: avoid; }
         .domain-section { page-break-inside: avoid; }
       }
     </style></head><body>
     <div class="header">
-      <h1>${profile.username}'s Research Report</h1>
-      <div class="subtitle">${profile.email} · Member since ${profile.created_at?.slice(0, 10)}</div>
-      <div class="subtitle">${reportSnapshot.papers_read} papers read · ${fmtCit(reportSnapshot.total_citations)} citations covered</div>
-      <div class="filter-badge">Filter: ${filterText}</div>
+      <h1>${profile.username}'s Research Journey</h1>
+      <div class="subtitle">${profile.email}</div>
+      <div class="subtitle">Member since ${profile.created_at?.slice(0, 10)} • ${st.days_since_join} days active</div>
+      <div class="subtitle"><strong>${reportSnapshot.papers_read}</strong> papers explored • <strong>${fmtCit(reportSnapshot.total_citations)}</strong> citations covered</div>
+      <div class="filter-badge">📊 ${filterText}</div>
     </div>
 
-    <h2>Overview Statistics</h2>
+    <h2>📈 Performance Metrics</h2>
     <div class="stat-grid">${statsHtml}</div>
 
+    ${insightsHtml}
     ${readingChartHtml}
     ${topicDistHtml}
     ${focusHtml}
 
     <div class="footer">
-      Generated by <strong>ResearchViewer</strong> on ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+      <strong>Generated by ResearchViewer</strong><br>
+      ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
     </div>
     </body></html>`);
 
@@ -822,13 +873,13 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                   <div>
                     <h3 className="text-sm font-semibold text-gray-800 mb-0.5">Research Report</h3>
                     <p className="text-xs text-gray-500">
-                      Analyze your reading patterns and statistics
+                      Deep insights into your reading journey
                     </p>
                   </div>
                   {reportSnapshot && (
                     <button
                       onClick={exportReport}
-                      className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
+                      className="px-3 py-1.5 rounded-lg bg-gray-800 text-white text-xs font-medium hover:bg-gray-700 flex items-center gap-1.5"
                     >
                       <FileText size={12} />
                       Export
@@ -839,7 +890,6 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                 {/* Filters Section */}
                 <div className="p-3.5 rounded-xl border border-gray-200 bg-gray-50">
                   <div className="grid grid-cols-2 gap-2.5">
-                    {/* Domain Filter */}
                     <div>
                       <label className="text-[10px] text-gray-500 font-medium mb-1 block">Domain</label>
                       <select
@@ -853,8 +903,6 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                         ))}
                       </select>
                     </div>
-
-                    {/* Topic Filter */}
                     <div>
                       <label className="text-[10px] text-gray-500 font-medium mb-1 block">Topic</label>
                       <select
@@ -895,60 +943,76 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                 {/* Report Display */}
                 {reportSnapshot && profile && (
                   <div className="space-y-5">
-                    {/* Key Metrics */}
+                    {/* Personalized Header */}
+                    <div className="p-4 rounded-xl bg-gradient-to-br from-gray-800 to-gray-700 text-white">
+                      <h2 className="text-lg font-bold mb-1" style={{ fontFamily: "'Instrument Serif', serif" }}>
+                        {profile.username}'s Research Journey
+                      </h2>
+                      <p className="text-sm text-gray-300">
+                        {reportSnapshot.papers_read} papers explored · {fmtCit(reportSnapshot.total_citations)} citations covered
+                      </p>
+                    </div>
+
+                    {/* Key Metrics Grid */}
                     <div>
                       <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
-                        Overview
+                        Key Metrics
                       </p>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100">
-                          <p className="text-[8px] text-gray-400 uppercase tracking-wide mb-0.5">Papers Read</p>
+                      <div className="grid grid-cols-4 gap-2">
+                        <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100 text-center">
+                          <p className="text-[8px] text-gray-400 uppercase tracking-wide mb-0.5">Papers</p>
                           <p className="text-xl font-bold text-gray-800 font-mono">{reportSnapshot.papers_read}</p>
                         </div>
-                        <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100">
+                        <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100 text-center">
                           <p className="text-[8px] text-gray-400 uppercase tracking-wide mb-0.5">Citations</p>
                           <p className="text-xl font-bold text-gray-800 font-mono">{fmtCit(reportSnapshot.total_citations)}</p>
                         </div>
-                        <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100">
-                          <p className="text-[8px] text-gray-400 uppercase tracking-wide mb-0.5">Avg/Paper</p>
+                        <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100 text-center">
+                          <p className="text-[8px] text-gray-400 uppercase tracking-wide mb-0.5">Avg</p>
                           <p className="text-xl font-bold text-gray-800 font-mono">{fmtCit(Math.round(reportSnapshot.avg_citations))}</p>
+                        </div>
+                        <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100 text-center">
+                          <p className="text-[8px] text-gray-400 uppercase tracking-wide mb-0.5">Pace</p>
+                          <p className="text-xl font-bold text-gray-800 font-mono">{st.reading_pace_per_week}/w</p>
                         </div>
                       </div>
                     </div>
 
-                    {/* Reading Over Time */}
+                    {/* Reading Over Time Chart */}
                     {profile.reading_over_time.length > 0 && (
                       <div>
                         <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
-                          Reading Activity
+                          Reading Trend
                         </p>
-                        <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                        <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
                           <div className="flex gap-2">
-                            {/* Y-axis */}
-                            <div className="flex flex-col justify-between h-24 py-0.5">
+                            <div className="flex flex-col justify-between h-32 py-0.5">
                               {(() => {
                                 const max = Math.max(...profile.reading_over_time.map(m => m.count), 1);
                                 const ticks = max <= 3 ? [max, Math.ceil(max / 2), 0] : [max, Math.ceil(max * 0.75), Math.ceil(max * 0.5), Math.ceil(max * 0.25), 0];
                                 return ticks.map((tick, i) => (
-                                  <span key={i} className="text-[8px] text-gray-400 font-mono w-5 text-right">{tick}</span>
+                                  <span key={i} className="text-[8px] text-gray-400 font-mono w-6 text-right">{tick}</span>
                                 ));
                               })()}
                             </div>
-                            {/* Bars */}
-                            <div className="flex-1 flex items-end gap-1 h-24 border-l border-b border-gray-200">
+                            <div className="flex-1 flex items-end gap-1 h-32 border-l border-b border-gray-200 rounded-bl">
                               {profile.reading_over_time.map(({ month, count }, i) => {
                                 const max = Math.max(...profile.reading_over_time.map(m => m.count), 1);
-                                const containerHeight = 96;
+                                const containerHeight = 128;
                                 const heightPx = Math.max((count / max) * containerHeight, count > 0 ? 4 : 2);
+                                const isLast = i === profile.reading_over_time.length - 1;
                                 return (
-                                  <div key={month} className="flex-1 flex flex-col items-center justify-end" title={`${month}: ${count} papers`}>
-                                    <div className="w-full rounded-t" style={{ height: `${heightPx}px`, backgroundColor: i === profile.reading_over_time.length - 1 ? '#374151' : '#9ca3af' }} />
+                                  <div key={month} className="flex-1 flex flex-col items-center justify-end group" title={`${month}: ${count} papers`}>
+                                    <div className="w-full rounded-t transition-all" style={{
+                                      height: `${heightPx}px`,
+                                      backgroundColor: isLast ? '#1f2937' : '#9ca3af'
+                                    }} />
                                   </div>
                                 );
                               })}
                             </div>
                           </div>
-                          <div className="flex justify-between mt-1.5 ml-7 text-[8px] text-gray-400 font-mono">
+                          <div className="flex justify-between mt-2 ml-8 text-[8px] text-gray-400 font-mono">
                             <span>{profile.reading_over_time[0]?.month}</span>
                             <span>{profile.reading_over_time[profile.reading_over_time.length - 1]?.month}</span>
                           </div>
@@ -956,37 +1020,39 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                       </div>
                     )}
 
-                    {/* Topic Breakdown */}
+                    {/* Topic Distribution */}
                     {profile.reading_by_microtopic && profile.reading_by_microtopic.length > 0 && (
                       <div>
                         <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
-                          Topic Distribution
+                          Topic Breakdown
                         </p>
-                        <div className="space-y-3">
-                          {Object.entries(
-                            readingByDomainAndTopic.byDomain
-                          )
+                        <div className="space-y-2.5">
+                          {Object.entries(readingByDomainAndTopic.byDomain)
                             .filter(([domain]) => reportFilters.domain === 'all' || reportFilters.domain === domain)
                             .slice(0, 3)
                             .map(([domain, topics]) => {
-                              const topicEntries = Object.entries(topics).slice(0, 3);
+                              const topicEntries = Object.entries(topics).slice(0, 4);
+                              const domainTotal = topicEntries.reduce((sum, [, mics]) => sum + mics.reduce((s: number, m: any) => s + m.count, 0), 0);
                               return (
-                                <div key={domain} className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                                  <p className="text-[9px] font-bold text-gray-600 uppercase tracking-wider mb-2">{domain}</p>
-                                  <div className="space-y-1.5">
+                                <div key={domain} className="p-3 rounded-xl bg-white border border-gray-200 shadow-sm">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <p className="text-[10px] font-bold text-gray-700 uppercase tracking-wider">{domain}</p>
+                                    <span className="text-[9px] text-gray-500 font-mono">{domainTotal} papers</span>
+                                  </div>
+                                  <div className="space-y-2">
                                     {topicEntries.map(([topic, microtopics]) => {
                                       const topicTotal = microtopics.reduce((sum, m) => sum + m.count, 0);
                                       const topicPct = reportSnapshot.papers_read > 0 ? (topicTotal / reportSnapshot.papers_read) * 100 : 0;
                                       const cat = getCatColor(topic);
                                       return (
                                         <div key={topic} className="flex items-center gap-2">
-                                          <span className="text-[10px] font-medium text-gray-700 w-24 truncate" title={topic}>
+                                          <span className="text-[10px] font-medium text-gray-700 w-28 truncate" title={topic}>
                                             {topic.split('/').pop()}
                                           </span>
-                                          <div className="flex-1 h-1.5 bg-gray-200 rounded overflow-hidden">
-                                            <div className="h-full rounded" style={{ width: `${topicPct}%`, backgroundColor: cat.border }} />
+                                          <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                                            <div className="h-full rounded-full transition-all" style={{ width: `${topicPct}%`, backgroundColor: cat.border }} />
                                           </div>
-                                          <span className="w-8 text-right text-[10px] text-gray-500 font-mono">{topicTotal}</span>
+                                          <span className="w-10 text-right text-[10px] text-gray-600 font-mono font-semibold">{topicTotal}</span>
                                         </div>
                                       );
                                     })}
@@ -1001,39 +1067,61 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                     {/* Insights */}
                     <div>
                       <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
-                        Insights
+                        Insights & Achievements
                       </p>
-                      <div className="space-y-2">
-                        <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100 text-xs text-gray-700">
-                          <span className="font-medium">Reading pace:</span> {st.reading_pace_per_week} papers/week over {st.days_since_join} days
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-3 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200">
+                          <p className="text-[9px] text-blue-600 uppercase font-semibold mb-1">Reading Velocity</p>
+                          <p className="text-lg font-bold text-blue-900 font-mono">{st.reading_pace_per_week}</p>
+                          <p className="text-[9px] text-blue-700">papers per week</p>
+                        </div>
+                        <div className="p-3 rounded-xl bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200">
+                          <p className="text-[9px] text-purple-600 uppercase font-semibold mb-1">Active Days</p>
+                          <p className="text-lg font-bold text-purple-900 font-mono">{st.days_since_join}</p>
+                          <p className="text-[9px] text-purple-700">since joining</p>
                         </div>
                         {reportSnapshot.publications > 0 && (
-                          <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100 text-xs text-gray-700">
-                            <span className="font-medium">Publications:</span> {reportSnapshot.publications} papers with {fmtCit(reportSnapshot.pub_citations)} total citations
+                          <div className="p-3 rounded-xl bg-gradient-to-br from-green-50 to-green-100 border border-green-200">
+                            <p className="text-[9px] text-green-600 uppercase font-semibold mb-1">Publications</p>
+                            <p className="text-lg font-bold text-green-900 font-mono">{reportSnapshot.publications}</p>
+                            <p className="text-[9px] text-green-700">{fmtCit(reportSnapshot.pub_citations)} citations</p>
                           </div>
                         )}
                         {profile.focus_topics.length > 0 && (
-                          <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-100">
-                            <p className="text-xs text-gray-700 font-medium mb-1">Focus areas:</p>
-                            <div className="flex flex-wrap gap-1">
-                              {profile.focus_topics.slice(0, 5).map(t => {
-                                const c = getCatColor(t);
-                                return (
-                                  <span key={t} className="px-2 py-0.5 rounded-full text-[10px] font-medium border" style={{ backgroundColor: c.fill, color: c.text, borderColor: c.border + '40' }}>
-                                    {t.split('/').pop()}
-                                  </span>
-                                );
-                              })}
-                            </div>
+                          <div className="p-3 rounded-xl bg-gradient-to-br from-amber-50 to-amber-100 border border-amber-200">
+                            <p className="text-[9px] text-amber-600 uppercase font-semibold mb-1">Focus Areas</p>
+                            <p className="text-lg font-bold text-amber-900 font-mono">{profile.focus_topics.length}</p>
+                            <p className="text-[9px] text-amber-700">research topics</p>
                           </div>
                         )}
                       </div>
                     </div>
 
+                    {/* Focus Topics */}
+                    {profile.focus_topics.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                          Research Interests
+                        </p>
+                        <div className="p-3 rounded-xl bg-white border border-gray-200 shadow-sm">
+                          <div className="flex flex-wrap gap-1.5">
+                            {profile.focus_topics.slice(0, 8).map(t => {
+                              const c = getCatColor(t);
+                              return (
+                                <span key={t} className="px-2.5 py-1 rounded-lg text-[10px] font-semibold border shadow-sm" style={{ backgroundColor: c.fill, color: c.text, borderColor: c.border }}>
+                                  {t.split('/').pop()}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Timestamp */}
-                    <div className="text-center">
+                    <div className="text-center pt-2 border-t border-gray-200">
                       <span className="text-[9px] text-gray-400 font-mono">
-                        Generated on {new Date(reportSnapshot.timestamp).toLocaleString()}
+                        Report generated {new Date(reportSnapshot.timestamp).toLocaleString()}
                       </span>
                     </div>
                   </div>
@@ -1041,11 +1129,11 @@ export function UserProfilePanel({ userId, onClose }: Props) {
 
                 {/* Empty State */}
                 {!reportSnapshot && !loading && (
-                  <div className="text-center py-12">
-                    <BarChart3 size={40} className="mx-auto text-gray-300 mb-2" />
-                    <p className="text-sm text-gray-600 font-medium mb-1">No Report Generated</p>
+                  <div className="text-center py-16">
+                    <BarChart3 size={48} className="mx-auto text-gray-300 mb-3" />
+                    <p className="text-sm text-gray-700 font-semibold mb-1">Create Your Research Report</p>
                     <p className="text-xs text-gray-500">
-                      Configure filters above and click "Generate Report"
+                      Select filters and generate insights into your reading journey
                     </p>
                   </div>
                 )}
