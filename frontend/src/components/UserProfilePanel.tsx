@@ -150,9 +150,14 @@ export function UserProfilePanel({ userId, onClose }: Props) {
         url: pubUrl || undefined,
         coauthors: pubAuthors
       });
-      const p = await api.getPublications(userId);
+      // Refresh both publications and profile to update counts
+      const [p, u] = await Promise.all([
+        api.getPublications(userId),
+        api.getUser(userId)
+      ]);
       setPubs(p.publications);
       setPubCites(p.total_citations);
+      setProfile(u);
       // Reset form
       setPubTitle('');
       setPubDoi('');
@@ -165,7 +170,19 @@ export function UserProfilePanel({ userId, onClose }: Props) {
     }
   };
   const delPub = async (id: number) => {
-    try { await api.deletePublication(userId, id); setPubs(p => p.filter(x => x.id !== id)); } catch {}
+    try {
+      await api.deletePublication(userId, id);
+      // Refresh both publications and profile to update counts
+      const [p, u] = await Promise.all([
+        api.getPublications(userId),
+        api.getUser(userId)
+      ]);
+      setPubs(p.publications);
+      setPubCites(p.total_citations);
+      setProfile(u);
+    } catch (err) {
+      console.error('Failed to delete publication:', err);
+    }
   };
   const handleEditClick = (pub: Publication) => {
     setEditingPubId(pub.id);
@@ -188,9 +205,14 @@ export function UserProfilePanel({ userId, onClose }: Props) {
         citation_count: editForm.citation_count ?? 0
       };
       await api.updatePublication(userId, editingPubId, formData);
-      const p = await api.getPublications(userId);
+      // Refresh both publications and profile to update citation counts
+      const [p, u] = await Promise.all([
+        api.getPublications(userId),
+        api.getUser(userId)
+      ]);
       setPubs(p.publications);
       setPubCites(p.total_citations);
+      setProfile(u);
       setEditingPubId(null);
       setEditForm({});
     } catch (err) {
