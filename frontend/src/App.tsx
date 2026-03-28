@@ -151,16 +151,23 @@ export default function App() {
 
   const markAsRead = useCallback(async (id: string) => {
     if (!userId) return;
+    // Optimistic update - remove from reading list immediately
+    setReadingListIds(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
     try {
       await api.markAsRead(userId, id);
-      // Remove from reading list after successfully marking as read
+    } catch (err) {
+      // Rollback on error - add back to reading list
+      console.error('Failed to mark as read:', err);
       setReadingListIds(prev => {
         const next = new Set(prev);
-        next.delete(id);
+        next.add(id);
         return next;
       });
-    } catch (err) {
-      console.error('Failed to mark as read:', err);
     }
   }, [userId]);
 

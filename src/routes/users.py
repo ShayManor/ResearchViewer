@@ -654,6 +654,7 @@ def add_to_reading_list(user_id):
         "INSERT INTO user_reading_list (user_id, paper_id, added_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
         [user_id, paper_id]
     )
+    db.commit()
 
     # Clear recommendations cache since reading list changed
     clear_user_recommendations_cache(user_id)
@@ -675,6 +676,7 @@ def remove_from_reading_list(user_id, paper_id):
         "DELETE FROM user_reading_list WHERE user_id = ? AND paper_id = ?",
         [user_id, paper_id]
     )
+    db.commit()
 
     # Clear recommendations cache since reading list changed
     clear_user_recommendations_cache(user_id)
@@ -751,7 +753,7 @@ def get_read_history(user_id):
 @users_bp.route("/api/users/<int:user_id>/read-history", methods=["POST"])
 @require_auth
 def add_to_read_history(user_id):
-    """Mark a paper as read."""
+    """Mark a paper as read and remove from reading list."""
     # Verify the authenticated user matches the requested user_id
     if g.user_id != user_id:
         return jsonify({'error': 'Unauthorized'}), 403
@@ -765,25 +767,43 @@ def add_to_read_history(user_id):
     if not paper_id:
         return jsonify({"error": "paper_id is required"}), 400
 
-    # Check if already added
-    existing = db.execute(
-        "SELECT COUNT(*) FROM user_read_history WHERE user_id = ? AND paper_id = ?",
-        [user_id, paper_id]
-    ).fetchone()[0]
+    # Start transaction to ensure atomic operation
+    db.execute("BEGIN TRANSACTION")
 
-    if existing > 0:
-        return jsonify({"status": "already_exists"}), 200
+    try:
+        # Check if already added to read history
+        existing = db.execute(
+            "SELECT COUNT(*) FROM user_read_history WHERE user_id = ? AND paper_id = ?",
+            [user_id, paper_id]
+        ).fetchone()[0]
 
-    # Add to read history
-    db.execute(
-        "INSERT INTO user_read_history (user_id, paper_id, read_at) VALUES (?, ?, ?)",
-        [user_id, paper_id, read_at]
-    )
+        if existing == 0:
+            # Add to read history
+            db.execute(
+                "INSERT INTO user_read_history (user_id, paper_id, read_at) VALUES (?, ?, ?)",
+                [user_id, paper_id, read_at]
+            )
 
-    # Clear recommendations cache since read history changed
-    clear_user_recommendations_cache(user_id)
+        # Remove from reading list (if present)
+        db.execute(
+            "DELETE FROM user_reading_list WHERE user_id = ? AND paper_id = ?",
+            [user_id, paper_id]
+        )
 
-    return jsonify({"status": "added"}), 201
+        # Commit transaction
+        db.execute("COMMIT")
+
+        # Clear recommendations cache since read history changed
+        clear_user_recommendations_cache(user_id)
+
+        return jsonify({"status": "added" if existing == 0 else "already_exists"}), 201 if existing == 0 else 200
+
+    except Exception as e:
+        # Rollback on error
+        db.execute("ROLLBACK")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "Failed to mark as read", "details": str(e)}), 500
 
 
 @users_bp.route("/api/users/<int:user_id>/read-history/<path:paper_id>", methods=["DELETE"])
