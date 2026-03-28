@@ -43,6 +43,7 @@ export default function App() {
 
   // Reading list
   const [readingListIds, setReadingListIds] = useState<Set<string>>(new Set());
+  const [readingListVersion, setReadingListVersion] = useState(0);
 
   // Dialogs
   const [searchOpen, setSearchOpen] = useState(false);
@@ -116,6 +117,8 @@ export default function App() {
 
     try {
       await api.addToReadingList(userId, id);
+      // Trigger re-fetch after successful backend update
+      setReadingListVersion(v => v + 1);
     } catch (err) {
       // Rollback on error
       console.error('Failed to add to reading list:', err);
@@ -138,6 +141,8 @@ export default function App() {
 
     try {
       await api.removeFromReadingList(userId, id);
+      // Trigger re-fetch after successful backend update
+      setReadingListVersion(v => v + 1);
     } catch (err) {
       // Rollback on error
       console.error('Failed to remove from reading list:', err);
@@ -160,6 +165,8 @@ export default function App() {
 
     try {
       await api.markAsRead(userId, id);
+      // Trigger re-fetch after successful backend update
+      setReadingListVersion(v => v + 1);
     } catch (err) {
       // Rollback on error - add back to reading list
       console.error('Failed to mark as read:', err);
@@ -325,7 +332,7 @@ export default function App() {
               </svg>
             </button>
 
-              <RightSidebar userId={userId} readingListIds={readingListIds} onRemoveFromList={removeFromList} onAddToList={addToList} onMarkAsRead={markAsRead} />
+              <RightSidebar userId={userId} readingListIds={readingListIds} onRemoveFromList={removeFromList} onAddToList={addToList} onMarkAsRead={markAsRead} readingListVersion={readingListVersion} />
             </div>
           </div>
         ) : (

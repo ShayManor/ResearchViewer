@@ -182,7 +182,12 @@ export function UserProfilePanel({ userId, onClose }: Props) {
   const handleSaveEdit = async () => {
     if (!editingPubId) return;
     try {
-      await api.updatePublication(userId, editingPubId, editForm);
+      // Ensure citation_count defaults to 0 if undefined
+      const formData = {
+        ...editForm,
+        citation_count: editForm.citation_count ?? 0
+      };
+      await api.updatePublication(userId, editingPubId, formData);
       const p = await api.getPublications(userId);
       setPubs(p.publications);
       setPubCites(p.total_citations);
@@ -762,7 +767,14 @@ export function UserProfilePanel({ userId, onClose }: Props) {
                             <input
                               type="number"
                               value={editForm.citation_count ?? ''}
-                              onChange={e => setEditForm({ ...editForm, citation_count: parseInt(e.target.value) || 0 })}
+                              onChange={e => {
+                                const val = e.target.value;
+                                // Allow empty field during editing, convert to number otherwise
+                                setEditForm({
+                                  ...editForm,
+                                  citation_count: val === '' ? undefined : (parseInt(val) || 0)
+                                });
+                              }}
                               placeholder="0"
                               className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm font-mono focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 placeholder:text-gray-300"
                             />

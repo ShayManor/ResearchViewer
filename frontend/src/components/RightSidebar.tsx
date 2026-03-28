@@ -3,10 +3,10 @@ import { BookOpen, Flame, Lightbulb, X, ExternalLink, Loader2, CheckCircle } fro
 import { fmtCit } from '../lib/colors';
 import { api, type Paper, type Recommendation } from '../lib/api';
 
-interface Props { userId: number; readingListIds: Set<string>; onRemoveFromList: (id: string) => void; onAddToList: (id: string) => void; onMarkAsRead?: (id: string) => void; }
+interface Props { userId: number; readingListIds: Set<string>; onRemoveFromList: (id: string) => void; onAddToList: (id: string) => void; onMarkAsRead?: (id: string) => void; readingListVersion: number; }
 type Tab = 'list' | 'hot' | 'recs';
 
-export function RightSidebar({ userId, readingListIds, onRemoveFromList, onAddToList, onMarkAsRead }: Props) {
+export function RightSidebar({ userId, readingListIds, onRemoveFromList, onAddToList, onMarkAsRead, readingListVersion }: Props) {
   const [tab, setTab] = useState<Tab>('list');
   const [listPapers, setListPapers] = useState<Paper[]>([]);
   const [listLoading, setListLoading] = useState(false);
@@ -19,7 +19,7 @@ export function RightSidebar({ userId, readingListIds, onRemoveFromList, onAddTo
   useEffect(() => {
     setListLoading(true);
     api.getReadingList(userId).then(d => setListPapers(d.papers)).catch(() => setListPapers([])).finally(() => setListLoading(false));
-  }, [userId, readingListIds.size]);
+  }, [userId, readingListVersion]);
 
   useEffect(() => {
     if (hotFetched) return;
@@ -30,7 +30,7 @@ export function RightSidebar({ userId, readingListIds, onRemoveFromList, onAddTo
   useEffect(() => {
     setRecsLoading(true);
     api.getRecommendations(userId, 8).then(d => setRecs(d.recommendations)).catch(() => setRecs([])).finally(() => setRecsLoading(false));
-  }, [userId, readingListIds.size]);
+  }, [userId, readingListVersion]);
 
   return (
     <div className="flex flex-col h-full">
