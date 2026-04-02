@@ -28,7 +28,6 @@ def get_microtopics():
     if sort_order not in ['ASC', 'DESC']:
         sort_order = 'DESC'
 
-    # Build query - ONLY select columns we need (not SELECT *)
     query = "SELECT microtopic_id, label, bucket_value, size FROM microtopics WHERE 1=1"
     params = []
 
@@ -49,7 +48,6 @@ def get_microtopics():
 
     result = db.execute(query, params).fetchdf()
 
-    # Fast conversion - use to_dict('records') instead of iterrows
     if result.empty:
         microtopics = []
     else:
