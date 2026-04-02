@@ -2,8 +2,8 @@ name: Site Health Check
 
 on:
   schedule:
-    # Run at 6:00 AM UTC daily (adjust timezone as needed)
-    - cron: '0 6 * * *'
+    # Run at 6:00 AM EST daily
+    - cron: '0 1 * * *'
   workflow_dispatch:  # Allow manual triggers
 
 jobs:
@@ -35,47 +35,84 @@ jobs:
           exit 1
         fi
 
-        # Check if response contains expected fields
+        # Check if response contains expected fields and valid data
         if ! echo "$BODY" | grep -q '"status"'; then
           echo "Health endpoint response missing expected fields"
           exit 1
         fi
 
-        echo "Health endpoint: OK (HTTP $HTTP_CODE)"
-        echo "$BODY" | jq '.' || echo "$BODY"
+        # Check paper count is > 1 million
+        PAPER_COUNT=$(echo "$BODY" | jq -r '.paper_count // 0')
+        if [ "$PAPER_COUNT" -lt 1000000 ]; then
+          echo "Health endpoint reports only $PAPER_COUNT papers (expected > 1M)"
+          exit 1
+        fi
+
+        echo "Health endpoint: OK (HTTP $HTTP_CODE, $PAPER_COUNT papers)"
+        echo "$BODY" | jq '.'
 
     - name: Check papers endpoint
       id: check-papers
       run: |
         echo "Checking /api/papers..."
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://researchviewer.org/api/papers?per_page=1")
-        if [ "$HTTP_CODE" -ne 200 ]; then
-          echo "Papers endpoint returned HTTP $HTTP_CODE"
+        RESPONSE=$(curl -s "https://researchviewer.org/api/papers?per_page=1")
+
+        # Check if response contains papers array
+        if ! echo "$RESPONSE" | jq -e '.papers' > /dev/null 2>&1; then
+          echo "Papers endpoint response missing 'papers' array"
           exit 1
         fi
-        echo "Papers endpoint: OK (HTTP $HTTP_CODE)"
+
+        # Check total count > 1 million
+        TOTAL=$(echo "$RESPONSE" | jq -r '.total // 0')
+        if [ "$TOTAL" -lt 1000000 ]; then
+          echo "Papers endpoint reports only $TOTAL total papers (expected > 1M)"
+          exit 1
+        fi
+
+        echo "Papers endpoint: OK ($TOTAL total papers)"
 
     - name: Check count papers endpoint
       id: check-count
       run: |
         echo "Checking /api/count_papers..."
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://researchviewer.org/api/count_papers)
-        if [ "$HTTP_CODE" -ne 200 ]; then
-          echo "Count papers endpoint returned HTTP $HTTP_CODE"
+        RESPONSE=$(curl -s https://researchviewer.org/api/count_papers)
+
+        # Check if response contains count field
+        if ! echo "$RESPONSE" | jq -e '.count' > /dev/null 2>&1; then
+          echo "Count papers endpoint response missing 'count' field"
           exit 1
         fi
-        echo "Count papers endpoint: OK (HTTP $HTTP_CODE)"
+
+        # Check count > 1 million
+        COUNT=$(echo "$RESPONSE" | jq -r '.count // 0')
+        if [ "$COUNT" -lt 1000000 ]; then
+          echo "Count papers endpoint reports only $COUNT papers (expected > 1M)"
+          exit 1
+        fi
+
+        echo "Count papers endpoint: OK ($COUNT papers)"
 
     - name: Check analytics endpoint
       id: check-analytics
       run: |
         echo "Checking /api/analytics/domains..."
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://researchviewer.org/api/analytics/domains?limit=1")
-        if [ "$HTTP_CODE" -ne 200 ]; then
-          echo "Analytics endpoint returned HTTP $HTTP_CODE"
+        RESPONSE=$(curl -s "https://researchviewer.org/api/analytics/domains?limit=1")
+
+        # Check if response contains domains array with at least one entry
+        if ! echo "$RESPONSE" | jq -e '.domains[0]' > /dev/null 2>&1; then
+          echo "Analytics endpoint response missing domains data"
           exit 1
         fi
-        echo "Analytics endpoint: OK (HTTP $HTTP_CODE)"
+
+        # Check that the domain has a reasonable paper count
+        DOMAIN_COUNT=$(echo "$RESPONSE" | jq -r '.domains[0].paper_count // 0')
+        if [ "$DOMAIN_COUNT" -lt 100000 ]; then
+          echo "Analytics endpoint shows suspiciously low paper count: $DOMAIN_COUNT"
+          exit 1
+        fi
+
+        echo "Analytics endpoint: OK (top domain has $DOMAIN_COUNT papers)"
 
     - name: Send failure notification via ntfy
       if: failure()
