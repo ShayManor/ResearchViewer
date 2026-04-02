@@ -1,0 +1,101 @@
+name: Site Health Check
+
+on:
+  schedule:
+    # Run at 6:00 AM UTC daily (adjust timezone as needed)
+    - cron: '0 6 * * *'
+  workflow_dispatch:  # Allow manual triggers
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check main site
+      id: check-main
+      run: |
+        echo "Checking https://researchviewer.org..."
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://researchviewer.org)
+        if [ "$HTTP_CODE" -ne 200 ]; then
+          echo "Main site returned HTTP $HTTP_CODE"
+          exit 1
+        fi
+        echo "Main site: OK (HTTP $HTTP_CODE)"
+
+    - name: Check health endpoint
+      id: check-health
+      run: |
+        echo "Checking /api/health..."
+        RESPONSE=$(curl -s -w "\n%{http_code}" https://researchviewer.org/api/health)
+        HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+        BODY=$(echo "$RESPONSE" | head -n-1)
+
+        if [ "$HTTP_CODE" -ne 200 ]; then
+          echo "Health endpoint returned HTTP $HTTP_CODE"
+          exit 1
+        fi
+
+        # Check if response contains expected fields
+        if ! echo "$BODY" | grep -q '"status"'; then
+          echo "Health endpoint response missing expected fields"
+          exit 1
+        fi
+
+        echo "Health endpoint: OK (HTTP $HTTP_CODE)"
+        echo "$BODY" | jq '.' || echo "$BODY"
+
+    - name: Check papers endpoint
+      id: check-papers
+      run: |
+        echo "Checking /api/papers..."
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://researchviewer.org/api/papers?per_page=1")
+        if [ "$HTTP_CODE" -ne 200 ]; then
+          echo "Papers endpoint returned HTTP $HTTP_CODE"
+          exit 1
+        fi
+        echo "Papers endpoint: OK (HTTP $HTTP_CODE)"
+
+    - name: Check count papers endpoint
+      id: check-count
+      run: |
+        echo "Checking /api/count_papers..."
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://researchviewer.org/api/count_papers)
+        if [ "$HTTP_CODE" -ne 200 ]; then
+          echo "Count papers endpoint returned HTTP $HTTP_CODE"
+          exit 1
+        fi
+        echo "Count papers endpoint: OK (HTTP $HTTP_CODE)"
+
+    - name: Check analytics endpoint
+      id: check-analytics
+      run: |
+        echo "Checking /api/analytics/domains..."
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://researchviewer.org/api/analytics/domains?limit=1")
+        if [ "$HTTP_CODE" -ne 200 ]; then
+          echo "Analytics endpoint returned HTTP $HTTP_CODE"
+          exit 1
+        fi
+        echo "Analytics endpoint: OK (HTTP $HTTP_CODE)"
+
+    - name: Send failure notification via ntfy
+      if: failure()
+      run: |
+        curl -H "Title: ResearchViewer Health Check Failed" \
+             -H "Priority: urgent" \
+             -H "Tags: warning,health" \
+             -H "Email: shay.manor@gmail.com" \
+             -d "The ResearchViewer health check failed.
+
+        Site: https://researchviewer.org
+        Time: $(date -u)
+        Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+        Status:
+        - Main site: ${{ steps.check-main.outcome }}
+        - Health endpoint: ${{ steps.check-health.outcome }}
+        - Papers endpoint: ${{ steps.check-papers.outcome }}
+        - Count papers: ${{ steps.check-count.outcome }}
+        - Analytics: ${{ steps.check-analytics.outcome }}
+
+        Check the logs for details." \
+             https://ntfy.sh/researchviewer-health-${{ secrets.NTFY_TOPIC_SUFFIX }}

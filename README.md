@@ -3,6 +3,7 @@
 A web application for exploring and analyzing research papers from arXiv. Built with Flask, DuckDB, and React.
 
 ![API Tests](https://github.com/ShayManor/ResearchViewer/actions/workflows/test-api.yml/badge.svg)
+![Site Health](https://github.com/ShayManor/ResearchViewer/actions/workflows/health-check.yml/badge.svg)
 
 ## Overview
 
