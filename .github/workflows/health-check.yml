@@ -117,20 +117,20 @@ jobs:
     - name: Send failure notification via ntfy
       if: failure()
       run: |
-        MESSAGE="The ResearchViewer health check failed at $(date -u).
+        MESSAGE="ResearchViewer health check failed at $(date -u '+%Y-%m-%d %H:%M:%S UTC').
 
         Site: https://researchviewer.org
 
-        Status:
+        Component Status:
         - Main site: ${{ steps.check-main.outcome }}
         - Health endpoint: ${{ steps.check-health.outcome }}
         - Papers endpoint: ${{ steps.check-papers.outcome }}
         - Count papers: ${{ steps.check-count.outcome }}
         - Analytics: ${{ steps.check-analytics.outcome }}
 
-        Click to view workflow logs."
+        View logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-        curl -H "Title: 🚨 ResearchViewer Health Check Failed" \
+        curl -H "Title: ResearchViewer Health Check Failed" \
              -H "Priority: urgent" \
              -H "Tags: warning,health" \
              -H "Actions: view, View Logs, ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
@@ -155,23 +155,32 @@ jobs:
 
         echo "Access token configured, sending email notification..."
 
-        EMAIL_MESSAGE="The ResearchViewer health check failed.
+        read -r -d '' EMAIL_MESSAGE << EOM
+        [ResearchViewer Monitoring Alert]
+
+        A health check failure has been detected for ResearchViewer.
 
         Site: https://researchviewer.org
-        Time: $(date -u)
-        Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
 
-        Status:
+        Component Status:
         - Main site: ${{ steps.check-main.outcome }}
         - Health endpoint: ${{ steps.check-health.outcome }}
         - Papers endpoint: ${{ steps.check-papers.outcome }}
         - Count papers: ${{ steps.check-count.outcome }}
-        - Analytics: ${{ steps.check-analytics.outcome }}"
+        - Analytics: ${{ steps.check-analytics.outcome }}
+
+        Workflow logs:
+        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+        --
+        ResearchViewer Automated Health Monitor
+        EOM
 
         RESPONSE=$(curl -w "\nHTTP_CODE:%{http_code}" \
              -H "Title: ResearchViewer Health Check Failed" \
-             -H "Priority: urgent" \
-             -H "Tags: warning,health" \
+             -H "Priority: high" \
+             -H "Tags: monitoring,alert" \
              -H "Email: shay.manor@gmail.com" \
              -H "Authorization: Bearer $NTFY_TOKEN" \
              -d "$EMAIL_MESSAGE" \
