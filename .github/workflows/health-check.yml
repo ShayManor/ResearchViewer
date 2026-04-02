@@ -2,8 +2,8 @@ name: Site Health Check
 
 on:
   schedule:
-    # Run at 6:00 AM EST daily
-    - cron: '0 1 * * *'
+    # Run every hour on the hour
+    - cron: '0 * * * *'
   workflow_dispatch:  # Allow manual triggers
 
 jobs:
