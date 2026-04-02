@@ -139,7 +139,7 @@ jobs:
              https://ntfy.sh/researchviewer-health-${{ secrets.NTFY_TOPIC_SUFFIX }}
 
     - name: Send failure email via ntfy (authenticated)
-      if: failure() && secrets.NTFY_ACCESS_TOKEN != ''
+      if: failure() && secrets.NTFY_ACCESS_TOKEN
       run: |
         EMAIL_MESSAGE="The ResearchViewer health check failed.
 
