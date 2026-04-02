@@ -144,10 +144,16 @@ jobs:
         NTFY_TOKEN: ${{ secrets.NTFY_ACCESS_TOKEN }}
         NTFY_SUFFIX: ${{ secrets.NTFY_TOPIC_SUFFIX }}
       run: |
+        echo "=== Email Notification Step ==="
         if [ -z "$NTFY_TOKEN" ]; then
-          echo "NTFY_ACCESS_TOKEN not configured, skipping email notification"
-          exit 0
+          echo "ERROR: NTFY_ACCESS_TOKEN secret is not configured in GitHub repository settings"
+          echo "Please configure the secret at: Settings → Secrets and variables → Actions → New repository secret"
+          echo "Name: NTFY_ACCESS_TOKEN"
+          echo "Value: Your ntfy.sh access token"
+          exit 1
         fi
+
+        echo "Access token configured, sending email notification..."
 
         EMAIL_MESSAGE="The ResearchViewer health check failed.
 
@@ -162,10 +168,15 @@ jobs:
         - Count papers: ${{ steps.check-count.outcome }}
         - Analytics: ${{ steps.check-analytics.outcome }}"
 
-        curl -H "Title: ResearchViewer Health Check Failed" \
+        RESPONSE=$(curl -w "\nHTTP_CODE:%{http_code}" \
+             -H "Title: ResearchViewer Health Check Failed" \
              -H "Priority: urgent" \
              -H "Tags: warning,health" \
              -H "Email: shay.manor@gmail.com" \
              -H "Authorization: Bearer $NTFY_TOKEN" \
              -d "$EMAIL_MESSAGE" \
-             https://ntfy.sh/researchviewer-health-$NTFY_SUFFIX
+             https://ntfy.sh/researchviewer-health-$NTFY_SUFFIX)
+
+        HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
+        echo "Email notification sent - HTTP status: $HTTP_CODE"
+        echo "$RESPONSE"
