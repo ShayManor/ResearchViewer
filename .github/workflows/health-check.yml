@@ -139,8 +139,16 @@ jobs:
              https://ntfy.sh/researchviewer-health-${{ secrets.NTFY_TOPIC_SUFFIX }}
 
     - name: Send failure email via ntfy (authenticated)
-      if: failure() && secrets.NTFY_ACCESS_TOKEN != ''
+      if: failure()
+      env:
+        NTFY_TOKEN: ${{ secrets.NTFY_ACCESS_TOKEN }}
+        NTFY_SUFFIX: ${{ secrets.NTFY_TOPIC_SUFFIX }}
       run: |
+        if [ -z "$NTFY_TOKEN" ]; then
+          echo "NTFY_ACCESS_TOKEN not configured, skipping email notification"
+          exit 0
+        fi
+
         EMAIL_MESSAGE="The ResearchViewer health check failed.
 
         Site: https://researchviewer.org
@@ -158,6 +166,6 @@ jobs:
              -H "Priority: urgent" \
              -H "Tags: warning,health" \
              -H "Email: shay.manor@gmail.com" \
-             -H "Authorization: Bearer ${{ secrets.NTFY_ACCESS_TOKEN }}" \
+             -H "Authorization: Bearer $NTFY_TOKEN" \
              -d "$EMAIL_MESSAGE" \
-             https://ntfy.sh/researchviewer-health-${{ secrets.NTFY_TOPIC_SUFFIX }}
+             https://ntfy.sh/researchviewer-health-$NTFY_SUFFIX
