@@ -155,8 +155,13 @@ jobs:
 
         echo "Access token configured, sending email notification..."
 
-        read -r -d '' EMAIL_MESSAGE << EOM
-        [ResearchViewer Monitoring Alert]
+        RESPONSE=$(curl -w "\nHTTP_CODE:%{http_code}" \
+             -H "Title: ResearchViewer Health Check Failed" \
+             -H "Priority: high" \
+             -H "Tags: monitoring,alert" \
+             -H "Email: shay.manor@gmail.com" \
+             -H "Authorization: Bearer $NTFY_TOKEN" \
+             -d "[ResearchViewer Monitoring Alert]
 
         A health check failure has been detected for ResearchViewer.
 
@@ -174,16 +179,7 @@ jobs:
         ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
         --
-        ResearchViewer Automated Health Monitor
-        EOM
-
-        RESPONSE=$(curl -w "\nHTTP_CODE:%{http_code}" \
-             -H "Title: ResearchViewer Health Check Failed" \
-             -H "Priority: high" \
-             -H "Tags: monitoring,alert" \
-             -H "Email: shay.manor@gmail.com" \
-             -H "Authorization: Bearer $NTFY_TOKEN" \
-             -d "$EMAIL_MESSAGE" \
+        ResearchViewer Automated Health Monitor" \
              https://ntfy.sh/researchviewer-health-$NTFY_SUFFIX)
 
         HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
