@@ -2,8 +2,8 @@
 
 A web application for exploring and analyzing research papers from arXiv.
 
-[![API Tests](https://github.com/ShayManor/ResearchViewer/actions/workflows/test-api.yml/badge.svg)](https://github.com/ShayManor/ResearchViewer/actions/workflows/test-api.yml)
-[![Site Health](https://github.com/ShayManor/ResearchViewer/actions/workflows/health-check.yml/badge.svg)](https://github.com/ShayManor/ResearchViewer/actions/workflows/health-check.yml)
+[![API Tests](https://github.com/ShayManor/ResearchViewer/actions/workflows/test-api.yml/badge.svg?branch=main)](https://github.com/ShayManor/ResearchViewer/actions/workflows/test-api.yml)
+[![Site Health](https://github.com/ShayManor/ResearchViewer/actions/workflows/health-check.yml/badge.svg?branch=main)](https://github.com/ShayManor/ResearchViewer/actions/workflows/health-check.yml)
 
 **Live Site**: [researchviewer.org](https://researchviewer.org) | **API**: [researchviewer.org/api](https://researchviewer.org/api/)
 

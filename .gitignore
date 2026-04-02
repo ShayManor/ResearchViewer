@@ -2,6 +2,8 @@ node_modules/
 frontend/node_modules/
 frontend/dist/
 data.db
+monitoring/
+config.cfg
 .idea
 .git
 __pycache__

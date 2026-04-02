@@ -11,6 +11,7 @@
    --restart unless-stopped \
    -p 80:8080 \
    -v /home/shay/dev/ResearchViewer/src:/app/host_data \
+   -v /home/shay/dev/ResearchViewer/monitoring:/app/monitoring \
    -v "$SECRETS_PATH/firebase-service-account.json:/app/firebase-service-account.json:ro" \
    -e DATA_DB_PATH=/app/host_data/data.db \
    -e USER_DB_PATH=/app/host_data/user.db \

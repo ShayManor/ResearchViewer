@@ -6,6 +6,7 @@ from flask import Flask, send_from_directory
 from flask_cors import CORS
 from flask_compress import Compress
 from flask_swagger_ui import get_swaggerui_blueprint
+import flask_monitoring_dashboard as dashboard
 
 from src.database import init_app as init_database, close_db
 from src.cache import cache
@@ -21,6 +22,9 @@ from src.routes.spec import spec_bp
 
 app = Flask(__name__, static_folder=None)
 Compress(app)
+
+# Initialize monitoring dashboard
+dashboard.bind(app, config_file='config.cfg')
 
 # Initialize database connection
 init_database(app)
