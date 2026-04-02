@@ -117,34 +117,31 @@ jobs:
     - name: Send failure notification via ntfy
       if: failure()
       run: |
+        MESSAGE="The ResearchViewer health check failed at $(date -u).
+
+        Site: https://researchviewer.org
+
+        Status:
+        - Main site: ${{ steps.check-main.outcome }}
+        - Health endpoint: ${{ steps.check-health.outcome }}
+        - Papers endpoint: ${{ steps.check-papers.outcome }}
+        - Count papers: ${{ steps.check-count.outcome }}
+        - Analytics: ${{ steps.check-analytics.outcome }}
+
+        Click to view workflow logs."
+
         curl -H "Title: 🚨 ResearchViewer Health Check Failed" \
              -H "Priority: urgent" \
              -H "Tags: warning,health" \
              -H "Actions: view, View Logs, ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
              -H "Click: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-             -d "The ResearchViewer health check failed at $(date -u).
-
-Site: https://researchviewer.org
-
-Status:
-- Main site: ${{ steps.check-main.outcome }}
-- Health endpoint: ${{ steps.check-health.outcome }}
-- Papers endpoint: ${{ steps.check-papers.outcome }}
-- Count papers: ${{ steps.check-count.outcome }}
-- Analytics: ${{ steps.check-analytics.outcome }}
-
-Click to view workflow logs." \
+             -d "$MESSAGE" \
              https://ntfy.sh/researchviewer-health-${{ secrets.NTFY_TOPIC_SUFFIX }}
 
     - name: Send failure email via ntfy (authenticated)
       if: failure() && secrets.NTFY_ACCESS_TOKEN != ''
       run: |
-        curl -H "Title: ResearchViewer Health Check Failed" \
-             -H "Priority: urgent" \
-             -H "Tags: warning,health" \
-             -H "Email: shay.manor@gmail.com" \
-             -H "Authorization: Bearer ${{ secrets.NTFY_ACCESS_TOKEN }}" \
-             -d "The ResearchViewer health check failed.
+        EMAIL_MESSAGE="The ResearchViewer health check failed.
 
         Site: https://researchviewer.org
         Time: $(date -u)
@@ -155,5 +152,12 @@ Click to view workflow logs." \
         - Health endpoint: ${{ steps.check-health.outcome }}
         - Papers endpoint: ${{ steps.check-papers.outcome }}
         - Count papers: ${{ steps.check-count.outcome }}
-        - Analytics: ${{ steps.check-analytics.outcome }}" \
+        - Analytics: ${{ steps.check-analytics.outcome }}"
+
+        curl -H "Title: ResearchViewer Health Check Failed" \
+             -H "Priority: urgent" \
+             -H "Tags: warning,health" \
+             -H "Email: shay.manor@gmail.com" \
+             -H "Authorization: Bearer ${{ secrets.NTFY_ACCESS_TOKEN }}" \
+             -d "$EMAIL_MESSAGE" \
              https://ntfy.sh/researchviewer-health-${{ secrets.NTFY_TOPIC_SUFFIX }}
