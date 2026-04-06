@@ -85,3 +85,179 @@ jobs:
 
       - name: Deploy
         run: ~/dev/ResearchViewer/deploy.sh '${{ needs.build.outputs.image_ref }}'
+
+  health-check:
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: always()  # Run even if deploy had issues
+
+    steps:
+      - name: Wait for deployment to stabilize
+        run: |
+          echo "Waiting 15 seconds for deployment to stabilize..."
+          sleep 15
+
+      - name: Check main site
+        id: check-main
+        run: |
+          echo "Checking https://researchviewer.org..."
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://researchviewer.org)
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "Main site returned HTTP $HTTP_CODE"
+            exit 1
+          fi
+          echo "Main site: OK (HTTP $HTTP_CODE)"
+
+      - name: Check health endpoint
+        id: check-health
+        run: |
+          echo "Checking /api/health..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" https://researchviewer.org/api/health)
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "Health endpoint returned HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          # Check if response contains expected fields and valid data
+          if ! echo "$BODY" | grep -q '"status"'; then
+            echo "Health endpoint response missing expected fields"
+            exit 1
+          fi
+
+          # Check paper count is > 1 million
+          PAPER_COUNT=$(echo "$BODY" | jq -r '.paper_count // 0')
+          if [ "$PAPER_COUNT" -lt 1000000 ]; then
+            echo "Health endpoint reports only $PAPER_COUNT papers (expected > 1M)"
+            exit 1
+          fi
+
+          echo "Health endpoint: OK (HTTP $HTTP_CODE, $PAPER_COUNT papers)"
+          echo "$BODY" | jq '.'
+
+      - name: Check papers endpoint
+        id: check-papers
+        run: |
+          echo "Checking /api/papers..."
+          RESPONSE=$(curl -s "https://researchviewer.org/api/papers?per_page=1")
+
+          # Check if response contains papers array
+          if ! echo "$RESPONSE" | jq -e '.papers' > /dev/null 2>&1; then
+            echo "Papers endpoint response missing 'papers' array"
+            exit 1
+          fi
+
+          # Check total count > 1 million
+          TOTAL=$(echo "$RESPONSE" | jq -r '.total // 0')
+          if [ "$TOTAL" -lt 1000000 ]; then
+            echo "Papers endpoint reports only $TOTAL total papers (expected > 1M)"
+            exit 1
+          fi
+
+          echo "Papers endpoint: OK ($TOTAL total papers)"
+
+      - name: Check analytics endpoint
+        id: check-analytics
+        run: |
+          echo "Checking /api/analytics/domains..."
+          RESPONSE=$(curl -s "https://researchviewer.org/api/analytics/domains?limit=1")
+
+          # Check if response contains domains array with at least one entry
+          if ! echo "$RESPONSE" | jq -e '.domains[0]' > /dev/null 2>&1; then
+            echo "Analytics endpoint response missing domains data"
+            exit 1
+          fi
+
+          # Check that the domain has a reasonable paper count
+          DOMAIN_COUNT=$(echo "$RESPONSE" | jq -r '.domains[0].paper_count // 0')
+          if [ "$DOMAIN_COUNT" -lt 100000 ]; then
+            echo "Analytics endpoint shows suspiciously low paper count: $DOMAIN_COUNT"
+            exit 1
+          fi
+
+          echo "Analytics endpoint: OK (top domain has $DOMAIN_COUNT papers)"
+
+      - name: Send failure notification via ntfy
+        if: failure()
+        run: |
+          MESSAGE="ResearchViewer post-deployment health check failed at $(date -u '+%Y-%m-%d %H:%M:%S UTC').
+
+          Deployment: ${{ needs.build.outputs.image_ref }}
+          Site: https://researchviewer.org
+
+          Component Status:
+          - Main site: ${{ steps.check-main.outcome }}
+          - Health endpoint: ${{ steps.check-health.outcome }}
+          - Papers endpoint: ${{ steps.check-papers.outcome }}
+          - Analytics: ${{ steps.check-analytics.outcome }}
+
+          View logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          curl -H "Title: ResearchViewer Post-Deploy Health Check Failed" \
+               -H "Priority: urgent" \
+               -H "Tags: warning,health,deployment" \
+               -H "Actions: view, View Logs, ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+               -H "Click: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+               -d "$MESSAGE" \
+               https://ntfy.sh/researchviewer-health-${{ secrets.NTFY_TOPIC_SUFFIX }}
+
+      - name: Send failure email via ntfy (authenticated)
+        if: failure()
+        env:
+          NTFY_TOKEN: ${{ secrets.NTFY_ACCESS_TOKEN }}
+          NTFY_SUFFIX: ${{ secrets.NTFY_TOPIC_SUFFIX }}
+        run: |
+          echo "=== Email Notification Step ==="
+          if [ -z "$NTFY_TOKEN" ]; then
+            echo "ERROR: NTFY_ACCESS_TOKEN secret is not configured"
+            exit 1
+          fi
+
+          echo "Access token configured, sending email notification..."
+
+          RESPONSE=$(curl -w "\nHTTP_CODE:%{http_code}" \
+               -H "Title: ResearchViewer Post-Deploy Health Check Failed" \
+               -H "Priority: high" \
+               -H "Tags: monitoring,alert,deployment" \
+               -H "Email: shay.manor@gmail.com" \
+               -H "Authorization: Bearer $NTFY_TOKEN" \
+               -d "[ResearchViewer Post-Deployment Alert]
+
+          A health check failure has been detected after deployment.
+
+          Deployment: ${{ needs.build.outputs.image_ref }}
+          Site: https://researchviewer.org
+          Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+          Component Status:
+          - Main site: ${{ steps.check-main.outcome }}
+          - Health endpoint: ${{ steps.check-health.outcome }}
+          - Papers endpoint: ${{ steps.check-papers.outcome }}
+          - Analytics: ${{ steps.check-analytics.outcome }}
+
+          Workflow logs:
+          ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          --
+          ResearchViewer Automated Health Monitor" \
+               https://ntfy.sh/researchviewer-health-$NTFY_SUFFIX)
+
+          HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
+          echo "Email notification sent - HTTP status: $HTTP_CODE"
+          echo "$RESPONSE"
+
+      - name: Post-deploy health check summary
+        if: always()
+        run: |
+          echo "## Post-Deployment Health Check Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Deployment:** ${{ needs.build.outputs.image_ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Main Site | ${{ steps.check-main.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Health Endpoint | ${{ steps.check-health.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Papers Endpoint | ${{ steps.check-papers.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Analytics Endpoint | ${{ steps.check-analytics.outcome }} |" >> $GITHUB_STEP_SUMMARY

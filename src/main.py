@@ -23,9 +23,8 @@ from src.routes.spec import spec_bp
 app = Flask(__name__, static_folder=None)
 Compress(app)
 
-# Initialize monitoring dashboard
+# Configure monitoring dashboard (bind later after routes are registered)
 dashboard.config.init_from(file='config.cfg')
-dashboard.bind(app)
 
 # Initialize database connection
 init_database(app)
@@ -71,6 +70,9 @@ app.register_blueprint(swaggerui_blueprint)
 
 # Frontend must be registered LAST (catch-all route)
 app.register_blueprint(frontend)
+
+# Bind monitoring dashboard AFTER all routes are registered
+dashboard.bind(app)
 
 CORS(app)
 
