@@ -6,7 +6,7 @@ from flask import Flask, send_from_directory
 from flask_cors import CORS
 from flask_compress import Compress
 from flask_swagger_ui import get_swaggerui_blueprint
-import flask_monitoring_dashboard as dashboard
+import flask_monitoringdashboard as dashboard
 
 from src.database import init_app as init_database, close_db
 from src.cache import cache
