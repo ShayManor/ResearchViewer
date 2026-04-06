@@ -84,7 +84,9 @@ jobs:
           chmod 600 ~/.researchviewer-secrets/firebase-service-account.json
 
       - name: Deploy
-        run: ~/dev/ResearchViewer/deploy.sh '${{ needs.build.outputs.image_ref }}'
+        env:
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+        run: ~/dev/ResearchViewer/deploy.sh '${{ needs.build.outputs.image_ref }}' '${{ secrets.DASHBOARD_PASSWORD }}'
 
   health-check:
     runs-on: ubuntu-latest
