@@ -24,7 +24,8 @@ app = Flask(__name__, static_folder=None)
 Compress(app)
 
 # Initialize monitoring dashboard
-dashboard.bind(app, config_file='config.cfg')
+dashboard.config.init_from(file='config.cfg')
+dashboard.bind(app)
 
 # Initialize database connection
 init_database(app)
