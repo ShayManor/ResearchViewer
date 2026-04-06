@@ -1,14 +1,3 @@
-"""
-Comprehensive test suite for Analytics API endpoints.
-
-Tests all analytics endpoints with:
-- Happy path scenarios
-- Edge cases
-- Error conditions
-- Parameter validation
-- Data integrity
-"""
-
 import pytest
 import json
 from src.main import app
@@ -757,32 +746,63 @@ class TestAnalyticsEdgeCases:
         assert len(data['velocity']) == 1000
 
     def test_hot_papers_with_invalid_date_format(self, client):
-        """Test hot papers with invalid date format.
-
-        Known issue: API currently raises DuckDB ConversionException instead of
-        returning a 400 error. This test documents the current behavior.
-        """
-        import pytest
-        from _duckdb import ConversionException
-
-        with pytest.raises(ConversionException):
-            response = client.get('/api/analytics/hot-papers?since=not-a-date')
-
-        # TODO: API should validate date format and return 400 error instead
+        """Test hot papers with invalid date format returns 400."""
+        response = client.get('/api/analytics/hot-papers?since=not-a-date')
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert 'error' in data
+        assert 'YYYY-MM-DD' in data['error']
 
     def test_citation_graph_with_negative_limit(self, client):
-        """Test citation graph with negative limit.
+        """Test citation graph with negative limit returns 400."""
+        response = client.get('/api/analytics/graph?limit=-1')
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert 'error' in data
+        assert 'non-negative' in data['error']
 
-        Known issue: API currently raises DuckDB BinderException instead of
-        validating limit parameter. This test documents the current behavior.
-        """
-        import pytest
-        from _duckdb import BinderException
+    def test_domains_with_negative_limit(self, client):
+        """Test domains with negative limit returns 400."""
+        response = client.get('/api/analytics/domains?limit=-5')
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert 'error' in data
 
-        with pytest.raises(BinderException):
-            response = client.get('/api/analytics/graph?limit=-1')
+    def test_topics_with_negative_limit(self, client):
+        """Test topics with negative limit returns 400."""
+        response = client.get('/api/analytics/topics?domain=test&limit=-1')
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert 'error' in data
 
-        # TODO: API should validate limit >= 0 and return 400 error instead
+    def test_subjects_with_negative_limit(self, client):
+        """Test subjects with negative limit returns 400."""
+        response = client.get('/api/analytics/subjects?limit=-10')
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert 'error' in data
+
+    def test_top_authors_with_negative_limit(self, client):
+        """Test top authors with negative limit returns 400."""
+        response = client.get('/api/analytics/authors/top?limit=-1')
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert 'error' in data
+
+    def test_hot_papers_with_negative_limit(self, client):
+        """Test hot papers with negative limit returns 400."""
+        response = client.get('/api/analytics/hot-papers?limit=-1')
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert 'error' in data
+
+    def test_domains_with_non_integer_limit(self, client):
+        """Test domains with non-integer limit returns 400."""
+        response = client.get('/api/analytics/domains?limit=abc')
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert 'error' in data
+        assert 'integer' in data['error']
 
 
 if __name__ == '__main__':

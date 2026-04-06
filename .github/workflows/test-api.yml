@@ -37,7 +37,7 @@ jobs:
 
     - name: Run tests
       run: |
-        python -m pytest tests/test_api.py -v --tb=short --junit-xml=pytest-results.xml
+        python -m pytest tests/ -v --tb=short --junit-xml=pytest-results.xml --ignore=tests/create_test_db.py
 
     - name: Publish test results
       uses: EnricoMi/publish-unit-test-result-action@v2

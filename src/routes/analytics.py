@@ -122,7 +122,13 @@ def subjects_breakdown():
     """Get paper counts by subject with average citations."""
     db = get_db()
 
-    limit = int(request.args.get('limit', 20))
+    # Validate limit
+    try:
+        limit = int(request.args.get('limit', 20))
+        if limit < 0:
+            return jsonify({"error": "limit must be non-negative"}), 400
+    except ValueError:
+        return jsonify({"error": "limit must be an integer"}), 400
 
     # Extract primary category (first in the list) and calculate avg citations
     result = db.execute("""
@@ -148,7 +154,15 @@ def top_authors():
 
     sort_by = request.args.get('sort_by', 'h_index')
     subject = request.args.get('subject')
-    limit = min(int(request.args.get('limit', 50)), 200)
+
+    # Validate limit
+    try:
+        limit_raw = int(request.args.get('limit', 50))
+        if limit_raw < 0:
+            return jsonify({"error": "limit must be non-negative"}), 400
+        limit = min(limit_raw, 200)
+    except ValueError:
+        return jsonify({"error": "limit must be an integer"}), 400
 
     # Validate sort_by
     allowed_sorts = ['h_index', 'works_count', 'cited_by_count']
@@ -258,7 +272,15 @@ def hot_papers():
     subject = request.args.get('subject')
     since = request.args.get('since')
     sort_by = request.args.get('sort_by', 'citation_count')
-    limit = int(request.args.get('limit', 10))
+
+    # Validate limit
+    try:
+        limit = int(request.args.get('limit', 10))
+        if limit < 0:
+            return jsonify({"error": "limit must be non-negative"}), 400
+    except ValueError:
+        return jsonify({"error": "limit must be an integer"}), 400
+
     user_id = request.args.get('user_id')  # Optional: filter out user's read papers
 
     # Default to 2 years ago
@@ -266,6 +288,13 @@ def hot_papers():
         import datetime
         two_years_ago = datetime.date.today() - datetime.timedelta(days=730)
         since = two_years_ago.isoformat()
+    else:
+        # Validate date format
+        import datetime
+        try:
+            datetime.date.fromisoformat(since)
+        except ValueError:
+            return jsonify({"error": "since must be in YYYY-MM-DD format"}), 400
 
     # Validate sort field
     allowed_sorts = ['citation_count', 'update_date']
@@ -310,7 +339,14 @@ def citation_graph():
     db = get_db()
 
     subject = request.args.get('subject')
-    limit = int(request.args.get('limit', 100))
+
+    # Validate limit
+    try:
+        limit = int(request.args.get('limit', 100))
+        if limit < 0:
+            return jsonify({"error": "limit must be non-negative"}), 400
+    except ValueError:
+        return jsonify({"error": "limit must be an integer"}), 400
 
     # Build query for papers
     query = """
@@ -377,7 +413,14 @@ def citation_graph():
 def domains():
     """Get paper counts grouped by primary_domain_name."""
     db = get_db()
-    limit = int(request.args.get('limit', 100))
+
+    # Validate limit
+    try:
+        limit = int(request.args.get('limit', 100))
+        if limit < 0:
+            return jsonify({"error": "limit must be non-negative"}), 400
+    except ValueError:
+        return jsonify({"error": "limit must be an integer"}), 400
 
     result = db.execute("""
         SELECT
@@ -402,7 +445,14 @@ def topics_in_domain():
     """Get paper counts grouped by primary_topic_name within a domain."""
     db = get_db()
     domain = request.args.get('domain')
-    limit = int(request.args.get('limit', 100))
+
+    # Validate limit
+    try:
+        limit = int(request.args.get('limit', 100))
+        if limit < 0:
+            return jsonify({"error": "limit must be non-negative"}), 400
+    except ValueError:
+        return jsonify({"error": "limit must be an integer"}), 400
 
     if not domain:
         return jsonify({"error": "domain query param is required"}), 400
