@@ -2,35 +2,25 @@ from flask import Blueprint, request, jsonify, g
 from src.database import get_user_db, get_data_db, df_to_json_serializable
 from src.cache import cache
 from src.auth import require_auth
+from src.sql_safety import (
+    InvalidParameter,
+    safe_int,
+    safe_sort_field,
+    safe_sort_order,
+)
 import datetime
 
 users_bp = Blueprint("users", __name__)
 
 
 def clear_user_recommendations_cache(user_id):
-    """Clear all cached recommendations for a specific user."""
-    # For SimpleCache with @cache.cached(), we need to clear the internal cache
-    # The simplest approach is to clear the entire cache or use a wildcard pattern
+    """Invalidate cached recommendations for a user.
 
-    # Since SimpleCache doesn't support wildcards, we'll clear common variations
-    # and also use cache.clear() as a nuclear option for development
-
-    # In production, you might want to use Redis with key patterns instead
-    cache.clear()  # Clear all cache - simple but effective for development
-
-    # Alternatively, if cache.clear() is too aggressive, uncomment below:
-    # Common query parameter combinations
-    # query_variations = [
-    #     '', 'limit=10', 'limit=20',
-    #     'limit=10&strategy=hybrid', 'limit=10&strategy=citations',
-    #     'limit=10&strategy=topics', 'strategy=hybrid',
-    # ]
-    # for query in query_variations:
-    #     if query:
-    #         key = f'view//api/users/{user_id}/recommendations?{query}'
-    #     else:
-    #         key = f'view//api/users/{user_id}/recommendations'
-    #     cache.delete(key)
+    SimpleCache has no pattern-delete, so we clear the whole cache. This
+    is blunt but correct — recommendations change rarely and the rest of
+    the cache rewarms cheaply.
+    """
+    cache.clear()
 
 
 @users_bp.route("/api/auth/register", methods=["POST"])
@@ -695,18 +685,20 @@ def get_read_history(user_id):
     user_db = get_user_db()
     data_db = get_data_db()
 
-    sort_by = request.args.get('sort_by', 'read_at')
-    sort_order = request.args.get('sort_order', 'DESC')
-    page = int(request.args.get('page', 1))
-    per_page = min(int(request.args.get('per_page', 50)), 100)
+    try:
+        page = safe_int(request.args.get('page'), default=1, minimum=1)
+        per_page = safe_int(
+            request.args.get('per_page'), default=50, minimum=1, maximum=100
+        )
+    except InvalidParameter as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    # Validate sort field
-    allowed_sorts = ['read_at', 'citation_count']
-    if sort_by not in allowed_sorts:
-        sort_by = 'read_at'
-
-    if sort_order not in ['ASC', 'DESC']:
-        sort_order = 'DESC'
+    sort_by = safe_sort_field(
+        request.args.get('sort_by'),
+        allowed=('read_at', 'citation_count'),
+        default='read_at',
+    )
+    sort_order = safe_sort_order(request.args.get('sort_order'))
 
     # Get total count from user DB
     total = user_db.execute(
@@ -972,8 +964,15 @@ def get_recommendations(user_id):
     user_db = get_user_db()
     data_db = get_data_db()
 
-    limit = int(request.args.get('limit', 10))
+    try:
+        limit = safe_int(
+            request.args.get('limit'), default=10, minimum=1, maximum=50
+        )
+    except InvalidParameter as exc:
+        return jsonify({"error": str(exc)}), 400
     strategy = request.args.get('strategy', 'hybrid')
+    if strategy not in ('hybrid', 'citation_graph', 'topic_similarity'):
+        strategy = 'hybrid'
 
     # Get user's read papers with timestamps from user DB
     read_papers = user_db.execute(

@@ -1,6 +1,8 @@
-from flask import Blueprint, request, jsonify
-from src.database import get_db, df_to_json_serializable
 import json
+
+import pandas as pd
+from flask import Blueprint, request, jsonify
+from src.database import get_data_db as get_db, df_to_json_serializable
 
 reports_bp = Blueprint("reports", __name__)
 
@@ -138,22 +140,27 @@ def get_full_topic_data(db, microtopic_id):
         median_citations = float(papers['citation_count'].median())
         max_citations = int(papers['citation_count'].max())
 
-        # Year range
-        papers['year'] = papers['update_date'].astype(str).str[:4]
-        year_range = f"{papers['year'].min()}-{papers['year'].max()}"
-
-        # Recent growth
         import datetime
+        papers['year'] = pd.to_numeric(
+            papers['update_date'].astype(str).str[:4], errors='coerce'
+        )
+        valid_years = papers['year'].dropna()
+        if valid_years.empty:
+            year_range = ""
+        else:
+            year_range = f"{int(valid_years.min())}-{int(valid_years.max())}"
+
         current_year = datetime.datetime.now().year
-        recent_papers = papers[papers['year'].astype(int) >= current_year - 2]
+        recent_papers = papers[papers['year'].fillna(0) >= current_year - 2]
         recent_growth_pct = (len(recent_papers) / len(papers)) * 100 if len(papers) > 0 else 0
 
         # Internal citations (papers in this topic that cite each other)
         paper_ids = set(papers['id'].tolist())
         internal_citation_count = 0
         for citations in papers['citations'].dropna():
-            if citations:
-                internal_citation_count += len([c for c in citations if c in paper_ids])
+            if citations is None or len(citations) == 0:
+                continue
+            internal_citation_count += sum(1 for c in citations if c in paper_ids)
 
         # Unique authors
         unique_authors = set()

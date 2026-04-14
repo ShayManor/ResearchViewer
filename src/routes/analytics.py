@@ -1,3 +1,5 @@
+import datetime
+
 from flask import Blueprint, request, jsonify
 from src.database import get_data_db as get_db, df_to_json_serializable
 from src.cache import cache
@@ -205,8 +207,6 @@ def submission_velocity():
     period = request.args.get('period', 'week')
     subject = request.args.get('subject')
     lookback = int(request.args.get('lookback', 12))
-
-    import datetime
 
     # Calculate period dates
     today = datetime.date.today()

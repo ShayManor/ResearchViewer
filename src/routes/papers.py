@@ -170,17 +170,27 @@ def count_papers():
     """Get number of papers with optional filters."""
     db = get_db()
 
-    # Get query parameters (same as get_papers)
     keyword = request.args.get('keyword')
     subject = request.args.get('subject')
     author = request.args.get('author')
     microtopic_id = request.args.get('microtopic_id')
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
-    min_citations = request.args.get('min_citations')
-    max_citations = request.args.get('max_citations')
 
-    # Build query
+    for label, value in (("start_date", start_date), ("end_date", end_date)):
+        if value is not None and not _ISO_DATE_RE.match(value):
+            return jsonify({"error": f"{label} must be YYYY-MM-DD"}), 400
+
+    try:
+        min_citations = request.args.get('min_citations')
+        max_citations = request.args.get('max_citations')
+        if min_citations is not None:
+            min_citations = safe_int(min_citations, default=0, minimum=0)
+        if max_citations is not None:
+            max_citations = safe_int(max_citations, default=0, minimum=0)
+    except InvalidParameter as exc:
+        return jsonify({"error": str(exc)}), 400
+
     if microtopic_id:
         query = """
             SELECT COUNT(DISTINCT p.id) FROM papers p
@@ -193,18 +203,22 @@ def count_papers():
         query = "SELECT COUNT(*) FROM papers WHERE deleted = false OR deleted IS NULL"
         params = []
 
-    # Add filters
     if keyword:
-        query += " AND (title ILIKE ? OR abstract ILIKE ? OR authors ILIKE ?)"
-        params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
+        kw = f"%{escape_like(keyword)}%"
+        query += (
+            " AND (title ILIKE ? ESCAPE '\\'"
+            " OR abstract ILIKE ? ESCAPE '\\'"
+            " OR authors ILIKE ? ESCAPE '\\')"
+        )
+        params.extend([kw, kw, kw])
 
     if subject:
-        query += " AND categories LIKE ?"
-        params.append(f"%{subject}%")
+        query += " AND categories LIKE ? ESCAPE '\\'"
+        params.append(f"%{escape_like(subject)}%")
 
     if author:
-        query += " AND authors ILIKE ?"
-        params.append(f"%{author}%")
+        query += " AND authors ILIKE ? ESCAPE '\\'"
+        params.append(f"%{escape_like(author)}%")
 
     if start_date:
         query += " AND update_date >= ?"
@@ -214,13 +228,13 @@ def count_papers():
         query += " AND update_date <= ?"
         params.append(end_date)
 
-    if min_citations:
+    if min_citations is not None:
         query += " AND citation_count >= ?"
-        params.append(int(min_citations))
+        params.append(min_citations)
 
-    if max_citations:
+    if max_citations is not None:
         query += " AND citation_count <= ?"
-        params.append(int(max_citations))
+        params.append(max_citations)
 
     result = db.execute(query, params).fetchone()
 
@@ -358,14 +372,18 @@ def delete_paper(doi):
     """Remove paper from database."""
     db = get_db()
 
-    # Soft delete by setting deleted flag
-    result = db.execute(
+    existing = db.execute(
+        "SELECT COUNT(*) FROM papers WHERE lower(doi) = lower(?) AND (deleted = false OR deleted IS NULL)",
+        [doi]
+    ).fetchone()[0]
+
+    if existing == 0:
+        return jsonify({"error": "Paper not found"}), 404
+
+    db.execute(
         "UPDATE papers SET deleted = true WHERE lower(doi) = lower(?)",
         [doi]
     )
-
-    if result.fetchone() is None:
-        return jsonify({"error": "Paper not found"}), 404
 
     return jsonify({"status": "deleted", "doi": doi})
 
@@ -382,28 +400,27 @@ def get_paper_citations(paper_id):
     """Get all papers that cite this paper. Papers whose citations array contains this ID."""
     db = get_db()
 
-    # Get query parameters for pagination and sorting
-    page = int(request.args.get('page', 1))
-    per_page = min(int(request.args.get('per_page', 20)), 100)
-    sort_by = request.args.get('sort_by', 'citation_count')
-    sort_order = request.args.get('sort_order', 'DESC')
+    try:
+        page = safe_int(request.args.get('page'), default=1, minimum=1)
+        per_page = safe_int(
+            request.args.get('per_page'), default=20, minimum=1, maximum=100
+        )
+    except InvalidParameter as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    # Validate sort field
-    allowed_sort_fields = ['citation_count', 'update_date', 'title']
-    if sort_by not in allowed_sort_fields:
-        sort_by = 'citation_count'
+    sort_by = safe_sort_field(
+        request.args.get('sort_by'),
+        allowed=('citation_count', 'update_date', 'title'),
+        default='citation_count',
+    )
+    sort_order = safe_sort_order(request.args.get('sort_order'))
 
-    if sort_order not in ['ASC', 'DESC']:
-        sort_order = 'DESC'
-
-    # Get total count
     count = db.execute("""
         SELECT COUNT(*) FROM papers
         WHERE list_contains(citations, ?)
         AND (deleted = false OR deleted IS NULL)
     """, [paper_id]).fetchone()[0]
 
-    # Get paginated results
     result = db.execute(f"""
         SELECT * FROM papers
         WHERE list_contains(citations, ?)
@@ -425,35 +442,31 @@ def get_paper_references(paper_id):
     """Get all papers this paper cites. Look up each ID in the paper's citations array."""
     db = get_db()
 
-    # Get query parameters for pagination
-    page = int(request.args.get('page', 1))
-    per_page = min(int(request.args.get('per_page', 20)), 100)
+    try:
+        page = safe_int(request.args.get('page'), default=1, minimum=1)
+        per_page = safe_int(
+            request.args.get('per_page'), default=20, minimum=1, maximum=100
+        )
+    except InvalidParameter as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    # Get the paper's citations array
     paper = db.execute(
         "SELECT citations FROM papers WHERE id = ?",
         [paper_id]
     ).fetchone()
 
-    if not paper or not paper[0]:
+    if not paper or paper[0] is None or len(paper[0]) == 0:
         return jsonify({"references": [], "count": 0, "page": page, "per_page": per_page})
 
-    citations = paper[0]
-
-    if not citations:
-        return jsonify({"references": [], "count": 0, "page": page, "per_page": per_page})
-
-    # Get papers with IDs in the citations list (with pagination)
+    citations = list(paper[0])
     placeholders = ','.join(['?'] * len(citations))
 
-    # Get total count
     count = db.execute(f"""
         SELECT COUNT(*) FROM papers
         WHERE id IN ({placeholders})
         AND (deleted = false OR deleted IS NULL)
     """, citations).fetchone()[0]
 
-    # Get paginated results
     result = db.execute(f"""
         SELECT * FROM papers
         WHERE id IN ({placeholders})

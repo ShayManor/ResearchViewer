@@ -28,8 +28,3 @@ def health_check():
             "database": "disconnected",
             "error": str(e)
         }), 503
-
-
-@health.route("/api/health/<message>")
-def health_check_message(message):
-    return jsonify({"response": message}), 200

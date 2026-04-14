@@ -6,6 +6,7 @@ from src.cache import cache
 from src.database import get_data_db as get_db, df_to_json_serializable
 from src.sql_safety import (
     InvalidParameter,
+    escape_like,
     safe_int,
     safe_sort_field,
     safe_sort_order,
@@ -24,21 +25,24 @@ def get_microtopics():
     """List microtopics with filtering."""
     db = get_db()
 
-    # Get query parameters
     bucket_value = request.args.get('bucket_value')
-    min_size = request.args.get('min_size')
     search = request.args.get('search')
-    sort_by = request.args.get('sort_by', 'size')
-    sort_order = request.args.get('sort_order', 'DESC')
-    limit = min(int(request.args.get('limit', 50)), 200)
 
-    # Validate sort field
-    allowed_sorts = ['size', 'label', 'created_at']
-    if sort_by not in allowed_sorts:
-        sort_by = 'size'
+    try:
+        limit = safe_int(
+            request.args.get('limit'), default=50, minimum=1, maximum=200
+        )
+        min_size_raw = request.args.get('min_size')
+        min_size = safe_int(min_size_raw, default=0, minimum=0) if min_size_raw else None
+    except InvalidParameter as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    if sort_order not in ['ASC', 'DESC']:
-        sort_order = 'DESC'
+    sort_by = safe_sort_field(
+        request.args.get('sort_by'),
+        allowed=('size', 'label', 'created_at'),
+        default='size',
+    )
+    sort_order = safe_sort_order(request.args.get('sort_order'))
 
     query = "SELECT microtopic_id, label, bucket_value, size FROM microtopics WHERE 1=1"
     params = []
@@ -47,13 +51,13 @@ def get_microtopics():
         query += " AND bucket_value = ?"
         params.append(bucket_value)
 
-    if min_size:
+    if min_size is not None:
         query += " AND size >= ?"
-        params.append(int(min_size))
+        params.append(min_size)
 
     if search:
-        query += " AND label ILIKE ?"
-        params.append(f"%{search}%")
+        query += " AND label ILIKE ? ESCAPE '\\'"
+        params.append(f"%{escape_like(search)}%")
 
     query += f" ORDER BY {sort_by} {sort_order} LIMIT ?"
     params.append(limit)
@@ -508,11 +512,21 @@ def microtopics_graph():
     """Returns a graph of microtopics as nodes and their relationships as edges."""
     db = get_db()
 
-    # Get query parameters
     bucket_value = request.args.get('bucket_value')
-    min_size = int(request.args.get('min_size', 5))
-    min_edge_weight = float(request.args.get('min_edge_weight', 0.01))
-    limit = min(int(request.args.get('limit', 100)), 200)
+    try:
+        min_size = safe_int(
+            request.args.get('min_size'), default=5, minimum=0
+        )
+        limit = safe_int(
+            request.args.get('limit'), default=100, minimum=1, maximum=200
+        )
+    except InvalidParameter as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    try:
+        min_edge_weight = float(request.args.get('min_edge_weight', 0.01))
+    except (TypeError, ValueError):
+        return jsonify({"error": "min_edge_weight must be a number"}), 400
 
     # Get microtopics
     query = "SELECT * FROM microtopics WHERE size >= ?"

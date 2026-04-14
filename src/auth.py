@@ -4,24 +4,25 @@ Firebase Authentication Middleware
 Provides @require_auth decorator to protect Flask routes with Firebase ID token verification.
 """
 
+import logging
 import os
 from functools import wraps
 from flask import request, jsonify, g
 import firebase_admin
 from firebase_admin import credentials, auth
 
-# Initialize Firebase Admin SDK
+logger = logging.getLogger(__name__)
+
 cred_path = os.getenv('FIREBASE_CREDENTIALS_PATH', 'firebase-service-account.json')
 if not os.path.exists(cred_path):
-    print(f"Warning: Firebase credentials not found at {cred_path}")
-    print("Authentication will fail until credentials are provided.")
+    logger.warning("Firebase credentials not found at %s; auth will fail", cred_path)
 else:
     try:
         cred = credentials.Certificate(cred_path)
         firebase_admin.initialize_app(cred)
-        print(f"Firebase Admin SDK initialized with credentials from {cred_path}")
+        logger.info("Firebase Admin SDK initialized from %s", cred_path)
     except Exception as e:
-        print(f"Error initializing Firebase Admin SDK: {e}")
+        logger.error("Error initializing Firebase Admin SDK: %s", e)
 
 
 def require_auth(f):
@@ -73,13 +74,13 @@ def require_auth(f):
             return f(*args, **kwargs)
 
         except auth.InvalidIdTokenError as e:
-            print(f"InvalidIdTokenError: {str(e)}, token length: {len(id_token)}, token[:50]: {id_token[:50]}")
+            logger.warning("InvalidIdTokenError: %s", e)
             return jsonify({'error': 'Invalid authentication token'}), 401
         except auth.ExpiredIdTokenError as e:
-            print(f"ExpiredIdTokenError: {str(e)}")
+            logger.info("ExpiredIdTokenError: %s", e)
             return jsonify({'error': 'Authentication token expired'}), 401
         except Exception as e:
-            print(f"Auth exception: {type(e).__name__}: {str(e)}")
-            return jsonify({'error': f'Authentication failed: {str(e)}'}), 401
+            logger.exception("Auth exception: %s", type(e).__name__)
+            return jsonify({'error': 'Authentication failed'}), 401
 
     return decorated_function

@@ -145,12 +145,13 @@ def create_test_database():
     # Create user_publications table
     conn.execute("""
         CREATE TABLE user_publications (
-            id INTEGER PRIMARY KEY,
+            id INTEGER PRIMARY KEY DEFAULT nextval('user_publications_id_seq'),
             user_id INTEGER,
             title VARCHAR,
             venue VARCHAR,
             year INTEGER,
             doi VARCHAR,
+            url VARCHAR,
             citation_count INTEGER DEFAULT 0,
             coauthors VARCHAR[],
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -319,6 +320,40 @@ def create_test_database():
             author['author_id'], author['name'], author['paper_dois'],
             author['h_index'], author['works_count'], author['cited_by_count']
         ])
+
+    sample_microtopics = [
+        ('mt-ml-001', 'categories', 'cs.LG', 1, 'Machine Learning Methods', 3,
+         '["learning", "model", "training"]',
+         '["Sample Paper on Machine Learning"]'),
+        ('mt-cv-002', 'categories', 'cs.CV', 2, 'Computer Vision', 2,
+         '["vision", "image", "detection"]',
+         '["Another Sample Paper on Computer Vision"]'),
+        ('mt-nlp-003', 'categories', 'cs.CL', 3, 'NLP & Transformers', 1,
+         '["nlp", "transformer", "language"]',
+         '["Research on Natural Language Processing"]'),
+    ]
+    for mt in sample_microtopics:
+        conn.execute(
+            """INSERT INTO microtopics (microtopic_id, bucket_column, bucket_value,
+               cluster_id, label, size, top_terms_json, representative_titles_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            list(mt),
+        )
+
+    paper_microtopic_links = [
+        ('2024.12345', '10.1234/test.paper.001', 'categories', 'cs.LG', 'mt-ml-001', 1, 0.95, True),
+        ('2024.12345', '10.1234/test.paper.001', 'categories', 'cs.LG', 'mt-cv-002', 2, 0.40, False),
+        ('2024.12346', '10.1234/test.paper.002', 'categories', 'cs.CV', 'mt-cv-002', 1, 0.92, True),
+        ('2024.12347', '10.1234/test.paper.003', 'categories', 'cs.CL', 'mt-nlp-003', 1, 0.88, True),
+        ('2024.12349', '10.1234/test.paper.005', 'categories', 'cs.LG', 'mt-ml-001', 1, 0.80, True),
+    ]
+    for pm in paper_microtopic_links:
+        conn.execute(
+            """INSERT INTO paper_microtopics (paper_id, doi, bucket_column, bucket_value,
+               microtopic_id, rank, score, is_primary)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            list(pm),
+        )
 
     conn.close()
     print(f"✅ Test database created at: {TEST_DB_PATH}")
