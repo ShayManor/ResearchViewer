@@ -1,15 +1,49 @@
+import re
+
 from flask import Blueprint, request, jsonify
 from src.database import get_data_db as get_db, df_to_json_serializable
+from src.sql_safety import (
+    InvalidParameter,
+    escape_like,
+    safe_int,
+    safe_sort_field,
+    safe_sort_order,
+)
 
 papers_bp = Blueprint("papers", __name__)
+
+# ISO date YYYY-MM-DD. We accept nothing else for date filters.
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 @papers_bp.route("/api/papers", methods=["GET"])
 def get_papers():
-    """Get all papers with optional filters. Supports pagination and sorting."""
+    """Get all papers with optional filters. Supports pagination and sorting.
+
+    All user input is sanitized before reaching SQL:
+      * Free-text filters (keyword, author, subject) are bound as `?`
+        parameters AND have LIKE wildcards escaped via `escape_like`.
+      * Numeric filters go through `safe_int` (parsed + range-clamped).
+      * Dates are regex-checked for ISO format before being bound.
+      * `sort_by` / `sort_order` are matched against fixed allowlists
+        before being interpolated into the ORDER BY clause.
+    """
     db = get_db()
 
-    # Get query parameters
+    try:
+        page = safe_int(request.args.get('page'), default=1, minimum=1)
+        per_page = safe_int(
+            request.args.get('per_page'), default=20, minimum=1, maximum=100
+        )
+        min_citations = request.args.get('min_citations')
+        max_citations = request.args.get('max_citations')
+        if min_citations is not None:
+            min_citations = safe_int(min_citations, default=0, minimum=0)
+        if max_citations is not None:
+            max_citations = safe_int(max_citations, default=0, minimum=0)
+    except InvalidParameter as exc:
+        return jsonify({"error": str(exc)}), 400
+
     keyword = request.args.get('keyword')
     subject = request.args.get('subject')
     author = request.args.get('author')
@@ -18,20 +52,17 @@ def get_papers():
     microtopic_id = request.args.get('microtopic_id')
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
-    min_citations = request.args.get('min_citations')
-    max_citations = request.args.get('max_citations')
-    page = int(request.args.get('page', 1))
-    per_page = min(int(request.args.get('per_page', 20)), 100)  # Max 100
 
-    # Validate sort_by field
-    allowed_sort_fields = ['citation_count', 'update_date', 'title']
-    sort_by = request.args.get('sort_by', 'citation_count')
-    if sort_by not in allowed_sort_fields:
-        sort_by = 'citation_count'
+    for label, value in (("start_date", start_date), ("end_date", end_date)):
+        if value is not None and not _ISO_DATE_RE.match(value):
+            return jsonify({"error": f"{label} must be YYYY-MM-DD"}), 400
 
-    sort_order = request.args.get('sort_order', 'DESC')
-    if sort_order not in ['ASC', 'DESC']:
-        sort_order = 'DESC'
+    sort_by = safe_sort_field(
+        request.args.get('sort_by'),
+        allowed=('citation_count', 'update_date', 'title'),
+        default='citation_count',
+    )
+    sort_order = safe_sort_order(request.args.get('sort_order'))
 
     # Build base query
     if microtopic_id:
@@ -54,24 +85,30 @@ def get_papers():
         count_query = "SELECT COUNT(*) FROM papers WHERE (deleted = false OR deleted IS NULL)"
         params = []
 
-    # Add filters
+    # Add filters. Every value is bound as a `?` parameter; LIKE patterns
+    # are escaped so user input cannot inject wildcards.
     if keyword:
-        filter_clause = " AND (title ILIKE ? OR abstract ILIKE ? OR authors ILIKE ?)"
+        kw = f"%{escape_like(keyword)}%"
+        filter_clause = (
+            " AND (title ILIKE ? ESCAPE '\\'"
+            " OR abstract ILIKE ? ESCAPE '\\'"
+            " OR authors ILIKE ? ESCAPE '\\')"
+        )
         base_query += filter_clause
         count_query += filter_clause
-        params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
+        params.extend([kw, kw, kw])
 
     if subject:
-        filter_clause = " AND categories LIKE ?"
+        filter_clause = " AND categories LIKE ? ESCAPE '\\'"
         base_query += filter_clause
         count_query += filter_clause
-        params.append(f"%{subject}%")
+        params.append(f"%{escape_like(subject)}%")
 
     if author:
-        filter_clause = " AND authors ILIKE ?"
+        filter_clause = " AND authors ILIKE ? ESCAPE '\\'"
         base_query += filter_clause
         count_query += filter_clause
-        params.append(f"%{author}%")
+        params.append(f"%{escape_like(author)}%")
 
     if domain:
         filter_clause = " AND primary_domain_name = ?"
@@ -97,17 +134,17 @@ def get_papers():
         count_query += filter_clause
         params.append(end_date)
 
-    if min_citations:
+    if min_citations is not None:
         filter_clause = " AND citation_count >= ?"
         base_query += filter_clause
         count_query += filter_clause
-        params.append(int(min_citations))
+        params.append(min_citations)
 
-    if max_citations:
+    if max_citations is not None:
         filter_clause = " AND citation_count <= ?"
         base_query += filter_clause
         count_query += filter_clause
-        params.append(int(max_citations))
+        params.append(max_citations)
 
     # Get total count (use a copy of params for count query)
     count_params = params.copy()

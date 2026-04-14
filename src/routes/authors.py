@@ -1,5 +1,12 @@
 from flask import Blueprint, request, jsonify
 from src.database import get_data_db as get_db, df_to_json_serializable
+from src.sql_safety import (
+    InvalidParameter,
+    escape_like,
+    safe_int,
+    safe_sort_field,
+    safe_sort_order,
+)
 
 authors_bp = Blueprint("authors", __name__)
 
@@ -9,22 +16,29 @@ def get_authors():
     """Get all authors with optional filters (name search, subject). Supports pagination."""
     db = get_db()
 
-    # Get query parameters
-    name = request.args.get('name')
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 20))
-    sort_by = request.args.get('sort_by', 'cited_by_count')
-    sort_order = request.args.get('sort_order', 'DESC')
+    try:
+        page = safe_int(request.args.get('page'), default=1, minimum=1)
+        per_page = safe_int(
+            request.args.get('per_page'), default=20, minimum=1, maximum=100
+        )
+    except InvalidParameter as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    # Build query
+    name = request.args.get('name')
+    sort_by = safe_sort_field(
+        request.args.get('sort_by'),
+        allowed=('cited_by_count', 'h_index', 'works_count', 'name'),
+        default='cited_by_count',
+    )
+    sort_order = safe_sort_order(request.args.get('sort_order'))
+
     query = "SELECT * FROM authors"
     params = []
 
     if name:
-        query += " WHERE name ILIKE ?"
-        params.append(f"%{name}%")
+        query += " WHERE name ILIKE ? ESCAPE '\\'"
+        params.append(f"%{escape_like(name)}%")
 
-    # Add sorting and pagination
     query += f" ORDER BY {sort_by} {sort_order} LIMIT ? OFFSET ?"
     params.append(per_page)
     params.append((page - 1) * per_page)

@@ -1,9 +1,21 @@
-from flask import Blueprint, request, jsonify
-from src.database import get_data_db as get_db, df_to_json_serializable
-from src.cache import cache
 import json
+import re
+
+from flask import Blueprint, request, jsonify
+from src.cache import cache
+from src.database import get_data_db as get_db, df_to_json_serializable
+from src.sql_safety import (
+    InvalidParameter,
+    safe_int,
+    safe_sort_field,
+    safe_sort_order,
+)
 
 microtopics_bp = Blueprint("microtopics", __name__)
+
+# Microtopic IDs are short alphanumeric tokens. Anything else is rejected
+# outright so we never even bind a hostile value to the query.
+_MICROTOPIC_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 
 
 @microtopics_bp.route("/api/microtopics", methods=["GET"])
@@ -224,28 +236,44 @@ def get_microtopic_detail(microtopic_id):
 @microtopics_bp.route("/api/microtopics/<microtopic_id>/papers", methods=["GET"])
 @cache.cached(timeout=300, query_string=True)
 def get_microtopic_papers(microtopic_id):
-    """Papers belonging to a microtopic, paginated."""
+    """Papers belonging to a microtopic, paginated.
+
+    Sanitization layers:
+      * `microtopic_id` (URL segment) is regex-checked, then bound as `?`.
+      * `page` / `per_page` go through `safe_int` with bounds.
+      * `sort_by` / `sort_order` are matched against fixed allowlists; the
+        ORDER BY clause is then assembled from constants only — no string
+        from `request.args` is ever interpolated into the SQL.
+    """
+    if not _MICROTOPIC_ID_RE.match(microtopic_id or ""):
+        return jsonify({"error": "invalid microtopic_id"}), 400
+
     db = get_db()
 
-    # Get query parameters
-    sort_by = request.args.get('sort_by', 'citation_count')
-    sort_order = request.args.get('sort_order', 'DESC')
-    page = int(request.args.get('page', 1))
-    per_page = min(int(request.args.get('per_page', 20)), 100)
+    try:
+        page = safe_int(request.args.get('page'), default=1, minimum=1)
+        per_page = safe_int(
+            request.args.get('per_page'), default=20, minimum=1, maximum=100
+        )
+    except InvalidParameter as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    # Validate sort field
-    allowed_sorts = ['citation_count', 'update_date', 'score']
-    if sort_by not in allowed_sorts:
-        sort_by = 'citation_count'
+    sort_by = safe_sort_field(
+        request.args.get('sort_by'),
+        allowed=('citation_count', 'update_date', 'score'),
+        default='citation_count',
+    )
+    sort_order = safe_sort_order(request.args.get('sort_order'))
 
-    if sort_order not in ['ASC', 'DESC']:
-        sort_order = 'DESC'
-
-    # Build query
-    if sort_by == 'score':
-        order_clause = f"pm.score {sort_order}"
-    else:
-        order_clause = f"p.{sort_by} {sort_order}"
+    # Map allowlisted sort_by -> a fixed, hand-written ORDER BY fragment.
+    # Because the value comes from a literal dict (not request.args), there
+    # is no path for user input to influence the SQL string here.
+    _ORDER_CLAUSES = {
+        'citation_count': 'p.citation_count',
+        'update_date': 'p.update_date',
+        'score': 'pm.score',
+    }
+    order_clause = f"{_ORDER_CLAUSES[sort_by]} {sort_order}"
 
     # Get total count (use DISTINCT to avoid counting duplicates)
     total = db.execute("""
