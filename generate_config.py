@@ -26,12 +26,12 @@ def generate_config():
     db_path = os.getenv('DASHBOARD_DB_PATH', 'sqlite:///monitoring/monitoring.db')
     timezone = os.getenv('DASHBOARD_TIMEZONE', 'America/Los_Angeles')
 
-    # Validate required fields
+    # Fail fast: never seed a predictable password. A missing secret must crash
+    # the container rather than quietly enabling login with a known default.
     if not password:
-        print("⚠️  WARNING: DASHBOARD_PASSWORD not set!")
-        print("   Using default password from config.cfg.example")
-        print("   Set DASHBOARD_PASSWORD environment variable in production")
-        password = 'your-secure-password-here'
+        print("❌ DASHBOARD_PASSWORD not set — refusing to generate config.", file=sys.stderr)
+        print("   Set the DASHBOARD_PASSWORD environment variable (production: GitHub secret via deploy.sh).", file=sys.stderr)
+        sys.exit(1)
 
     # Generate config content
     config_content = f"""[dashboard]

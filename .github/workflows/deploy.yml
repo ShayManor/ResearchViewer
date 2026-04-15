@@ -86,7 +86,10 @@ jobs:
       - name: Deploy
         env:
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
-        run: ~/dev/ResearchViewer/deploy.sh '${{ needs.build.outputs.image_ref }}' '${{ secrets.DASHBOARD_PASSWORD }}'
+          IMAGE_REF: ${{ needs.build.outputs.image_ref }}
+        run: |
+          chmod +x ./deploy.sh
+          ./deploy.sh "$IMAGE_REF" "$DASHBOARD_PASSWORD"
 
   health-check:
     runs-on: ubuntu-latest

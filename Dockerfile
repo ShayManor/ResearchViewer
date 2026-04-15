@@ -20,8 +20,6 @@ COPY generate_config.py ./generate_config.py
 
 ENV PORT=8080
 ENV DATABASE_PATH=/data/data.db
-ENV DASHBOARD_USERNAME=admin
-ENV DASHBOARD_PASSWORD=change-me-in-production
 ENV DASHBOARD_MONITOR_LEVEL=3
 ENV DASHBOARD_DB_PATH=sqlite:///monitoring/monitoring.db
 
