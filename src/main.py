@@ -84,23 +84,46 @@ def _sync_dashboard_password():
     password (and create the user if missing) every time the app starts so the
     secret pulled by deploy.sh is always the source of truth.
     """
+    import sys
     from flask_monitoringdashboard import config as fmd_config
     from flask_monitoringdashboard.database import User, session_scope
 
+    env_pw = os.environ.get("DASHBOARD_PASSWORD")
+    env_user = os.environ.get("DASHBOARD_USERNAME")
+
+    def _emit(msg):
+        print(msg, file=sys.stderr, flush=True)
+        try:
+            app.logger.warning(msg)
+        except Exception:
+            pass
+
+    _emit("=" * 60)
+    _emit("[dashboard-sync] starting password sync")
+    _emit(f"[dashboard-sync] env DASHBOARD_USERNAME = {env_user!r} (len={len(env_user) if env_user else 0})")
+    _emit(f"[dashboard-sync] env DASHBOARD_PASSWORD = {env_pw!r} (len={len(env_pw) if env_pw else 0})")
+    _emit(f"[dashboard-sync] fmd_config.username    = {fmd_config.username!r} (len={len(fmd_config.username or '')})")
+    _emit(f"[dashboard-sync] fmd_config.password    = {fmd_config.password!r} (len={len(fmd_config.password or '')})")
+
     try:
         with session_scope() as session:
+            existing = session.query(User).all()
+            _emit(f"[dashboard-sync] existing users in monitoring.db: {[(u.id, u.username) for u in existing]}")
+
             user = session.query(User).filter(User.username == fmd_config.username).one_or_none()
             if user is None:
                 user = User(username=fmd_config.username, is_admin=True)
                 user.set_password(password=fmd_config.password)
                 session.add(user)
-                app.logger.info("Dashboard user '%s' created from config", fmd_config.username)
+                _emit(f"[dashboard-sync] CREATED user {fmd_config.username!r}")
             else:
                 user.set_password(password=fmd_config.password)
                 user.is_admin = True
-                app.logger.info("Dashboard user '%s' password re-synced from config", fmd_config.username)
+                _emit(f"[dashboard-sync] UPDATED user {fmd_config.username!r} password hash")
+        _emit("[dashboard-sync] committed successfully")
     except Exception as exc:
-        app.logger.warning("Could not sync dashboard password: %s", exc)
+        _emit(f"[dashboard-sync] ERROR: {exc!r}")
+    _emit("=" * 60)
 
 
 _sync_dashboard_password()
