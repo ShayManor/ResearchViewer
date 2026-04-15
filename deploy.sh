@@ -22,6 +22,17 @@
  docker stop researchviewer || true
  docker rm researchviewer || true
 
+ # Force dashboard password to be re-seeded from DASHBOARD_PASSWORD on next start.
+ # flask-monitoringdashboard only reads config.password when fmd_user is empty,
+ # so we clear it every deploy to pick up rotated secrets.
+ MONITORING_DB="$MONITORING_PATH/monitoring.db"
+ if [ -f "$MONITORING_DB" ]; then
+   echo "🔑 Clearing cached dashboard user to re-seed password from secret..."
+   docker run --rm -v "$MONITORING_PATH:/monitoring" "$IMAGE_REF" \
+     python -c "import sqlite3; c=sqlite3.connect('/monitoring/monitoring.db'); c.execute('DELETE FROM fmd_user'); c.commit(); c.close()" \
+     || echo "   ⚠️  Could not clear fmd_user (table may not exist yet) — continuing"
+ fi
+
  echo "🚀 Starting new container..."
  docker run -d \
    --name researchviewer \
