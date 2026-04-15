@@ -74,6 +74,37 @@ app.register_blueprint(frontend)
 # Bind monitoring dashboard AFTER all routes are registered
 dashboard.bind(app)
 
+
+def _sync_dashboard_password():
+    """Force the flask-monitoringdashboard admin user to match config on every boot.
+
+    flask-monitoringdashboard only reads config.password when its User table is empty
+    (see flask_monitoringdashboard/database/auth.py). That means rotating
+    DASHBOARD_PASSWORD has no effect on an existing monitoring.db. We re-sync the
+    password (and create the user if missing) every time the app starts so the
+    secret pulled by deploy.sh is always the source of truth.
+    """
+    from flask_monitoringdashboard import config as fmd_config
+    from flask_monitoringdashboard.database import User, session_scope
+
+    try:
+        with session_scope() as session:
+            user = session.query(User).filter(User.username == fmd_config.username).one_or_none()
+            if user is None:
+                user = User(username=fmd_config.username, is_admin=True)
+                user.set_password(password=fmd_config.password)
+                session.add(user)
+                app.logger.info("Dashboard user '%s' created from config", fmd_config.username)
+            else:
+                user.set_password(password=fmd_config.password)
+                user.is_admin = True
+                app.logger.info("Dashboard user '%s' password re-synced from config", fmd_config.username)
+    except Exception as exc:
+        app.logger.warning("Could not sync dashboard password: %s", exc)
+
+
+_sync_dashboard_password()
+
 CORS(app)
 
 
